@@ -1,0 +1,54 @@
+__pycache__/
+build/
+packages/
+tmp/
+out/
+DebugConfig/
+RTE/
+project.uvguix.*
+*.bak
+*.d
+*.slo
+*.lo
+*.o
+*.obj
+*.log
+**/*.o
+.rtt-studio/
+.vscode/
+# Precompiled Headers
+*.gch
+*.pch
+
+# Linker files
+*.ilk
+*.dblite
+# Debugger Files
+*.pdb
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.bin
+*.elf
+*.axf
+*.exe
+*.out
+*.app
+*.map
+
+# debug information files
+*.dwo

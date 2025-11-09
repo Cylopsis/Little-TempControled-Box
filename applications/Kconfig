@@ -1,0 +1,37 @@
+menu "Application Configuration"
+    menu "Fan Configuration"
+        config PKG_USING_YS4028B12H
+            bool "Enable YS4028B12H Fan Driver"
+            select RT_USING_PWM
+            default y
+        
+        config PKG_USING_YS4028B12H_PWM_DEV_NAME
+            string "YS4028B12H PWM Device Name"
+            default "pwm1"
+            depends on PKG_USING_YS4028B12H
+            help
+                Set the PWM device name for the YS4028B12H fan.
+
+        config PKG_USING_YS4028B12H_PWM_CHANNEL
+            int "YS4028B12H PWM Channel"
+            default 0
+            depends on PKG_USING_YS4028B12H
+            help
+                Set the PWM channel for the YS4028B12H fan.
+
+        config PKG_USING_YS4028B12H_PERIOD
+            int "YS4028B12H PWM Period"
+            default 20000
+            depends on PKG_USING_YS4028B12H
+            help
+                Set the PWM period for the YS4028B12H fan in microseconds.
+        
+        config PKG_USING_YS4028B12H_DEFAULT_PAULSE
+            int "YS4028B12H Default Pulse Width"
+            default 1500
+            depends on PKG_USING_YS4028B12H
+            help
+                Set the default pulse width for the YS4028B12H fan in microseconds. 
+    
+    endmenu
+endmenu

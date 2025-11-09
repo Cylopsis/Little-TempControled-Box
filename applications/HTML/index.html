@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Temperature Chamber Control</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <h1>Temperature Chamber Dashboard</h1>
+    <div class="container">
+        <div class="thermometer-container">
+            <h2>Live Thermal View</h2>
+            <div class="thermometer">
+                <div class="thermometer-column">
+                    <div id="target-marker" class="thermometer-target"></div>
+                    <div id="temperature-fill" class="thermometer-fill">
+                        <div id="temperature-label" class="thermometer-label current">--°C</div>
+                    </div>
+                    <div id="target-label" class="thermometer-label target">Target --°C</div>
+                </div>
+                <div class="thermometer-scale">
+                    <span id="scale-max">80°C</span>
+                    <span id="scale-upper">60°C</span>
+                    <span id="scale-lower">40°C</span>
+                    <span id="scale-min">20°C</span>
+                </div>
+            </div>
+            <div class="thermometer-legend">
+                <span class="legend-item"><span class="marker current"></span>Current</span>
+                <span class="legend-item"><span class="marker target"></span>Target</span>
+            </div>
+        </div>
+        <div class="dashboard-container">
+            <h2>Real-time Metrics</h2>
+            <div class="grid-container">
+                <div class="grid-item">
+                    <span class="label">Current Temperature (°C):</span>
+                    <span id="current_temperature" class="value">--</span>
+                </div>
+                <div class="grid-item">
+                    <span class="label">Target Temperature (°C):</span>
+                    <span id="target_temperature" class="value">--</span>
+                </div>
+                <div class="grid-item">
+                    <span class="label">PTC Heater:</span>
+                    <span id="ptc_state" class="value">--</span>
+                </div>
+                <div class="grid-item">
+                    <span class="label">Control State:</span>
+                    <span id="control_state" class="value">--</span>
+                </div>
+                <div class="grid-item">
+                    <span class="label">Fan Output (%):</span>
+                    <span id="fan_speed_percent" class="value">--</span>
+                </div>
+                <div class="grid-item">
+                    <span class="label">Fan Output (0-1):</span>
+                    <span id="fan_speed" class="value">--</span>
+                </div>
+                <div class="grid-item">
+                    <span class="label">Feedforward Speed:</span>
+                    <span id="feedforward_speed" class="value">--</span>
+                </div>
+                <div class="grid-item">
+                    <span class="label">PID Output:</span>
+                    <span id="pid_output" class="value">--</span>
+                </div>
+                <div class="grid-item">
+                    <span class="label">PID KP:</span>
+                    <span id="pid_kp" class="value">--</span>
+                </div>
+                <div class="grid-item">
+                    <span class="label">PID KI:</span>
+                    <span id="pid_ki" class="value">--</span>
+                </div>
+                <div class="grid-item">
+                    <span class="label">PID KD:</span>
+                    <span id="pid_kd" class="value">--</span>
+                </div>
+                <div class="grid-item">
+                    <span class="label">Integral Error:</span>
+                    <span id="integral_error" class="value">--</span>
+                </div>
+                <div class="grid-item">
+                    <span class="label">Previous Error:</span>
+                    <span id="previous_error" class="value">--</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="control-panel-container">
+        <h2>Control Panel</h2>
+        <div class="controls-section">
+            <h3>Target Temperature Control</h3>
+            <div class="control-group">
+                <label for="target_temperature_input">Target Temperature (°C):</label>
+                <input type="number" id="target_temperature_input" step="0.1" class="control-input">
+                <button id="set_target_btn" class="control-button">Set Target</button>
+            </div>
+        </div>
+
+        <div class="controls-section">
+            <h3>Manual PID Override</h3>
+            <div class="control-group">
+                <label for="kp_input">Kp:</label>
+                <input type="number" id="kp_input" step="0.0001" class="control-input">
+            </div>
+            <div class="control-group">
+                <label for="ki_input">Ki:</label>
+                <input type="number" id="ki_input" step="0.0001" class="control-input">
+            </div>
+            <div class="control-group">
+                <label for="kd_input">Kd:</label>
+                <input type="number" id="kd_input" step="0.0001" class="control-input">
+            </div>
+             <button id="set_pid_btn" class="control-button">Set PID</button>
+        </div>
+
+        <div class="controls-section">
+            <h3>Feedforward Table</h3>
+            <table id="ff_table">
+                <thead>
+                    <tr>
+                        <th>Index</th>
+                        <th>Temperature (°C)</th>
+                        <th>Base Speed</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="ff_table_body">
+                    <!-- Rows will be dynamically inserted here by script.js -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
