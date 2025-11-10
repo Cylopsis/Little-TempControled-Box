@@ -28,6 +28,8 @@ document.addEventListener('DOMContentLoaded', () => {
         current_temperature: (v) => `${v.toFixed(2)} °C`,
         target_temperature: (v) => `${v.toFixed(2)} °C`,
         fan_speed_percent: (v) => `${v.toFixed(1)} %`,
+        current_humidity: (v) => `${v.toFixed(1)} %`,
+        env_temperature: (v) => `${v.toFixed(2)} °C`,
         fan_speed: (v) => v.toFixed(4),
         feedforward_speed: (v) => v.toFixed(4),
         pid_output: (v) => v.toFixed(4),
@@ -37,6 +39,9 @@ document.addEventListener('DOMContentLoaded', () => {
         integral_error: (v) => v.toFixed(4),
         previous_error: (v) => v.toFixed(4)
     };
+
+    formatters.current_humidity = (v) => `${v.toFixed(1)} %`;
+    formatters.env_temperature = (v) => `${v.toFixed(2)} °C`;
 
     const ffTableInitial = [
         { temperature: 20.0, baseSpeed: 0.00 },

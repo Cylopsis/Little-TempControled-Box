@@ -12,6 +12,7 @@
  ******************************************************************************/
 #define LED_PIN        ((3*32)+12)      // 工作指示灯引脚
 #define PTC_PIN        ((2*32)+0)       // PTC恒温发热片继电器控制引脚
+#define BTM_PTC_PIN    ((0*32)+22)      // 底板PTC发热片继电器控制引脚
 #define DHT_DATA_PIN   ((2*32)+1)
 #define SAMPLE_PERIOD_MS    1000        // 控制周期/采样周期 (ms)
 
@@ -41,6 +42,7 @@ float previous_error = 0.0f;
 
 /* PTC加热器状态变量 */
 rt_base_t ptc_state = PIN_LOW;
+rt_base_t btm_ptc_state = PIN_LOW;
 
 /* 控制状态与监控变量 */
 volatile control_state_t control_state = CONTROL_STATE_IDLE;
@@ -161,7 +163,7 @@ int main(void)
 
     /* 启动线程 */
     working_indicate = rt_thread_create("WorkingIndicate", working_led, RT_NULL, 256, 11, 20);
-    screen_thread = rt_thread_create("ScreenUpdate", screen_on, RT_NULL, 1280, 12, 20);
+    screen_thread = rt_thread_create("ScreenUpdate", screen_on, RT_NULL, 2048, 12, 20);
     if(working_indicate != RT_NULL && screen_thread != RT_NULL)
     {
         rt_thread_startup(working_indicate);
@@ -171,7 +173,9 @@ int main(void)
 
     /* 初始化PTC */
     rt_pin_mode(PTC_PIN, PIN_MODE_OUTPUT);
+    rt_pin_mode(BTM_PTC_PIN, PIN_MODE_OUTPUT);
     rt_pin_write(PTC_PIN, ptc_state);
+    rt_pin_write(BTM_PTC_PIN, btm_ptc_state);
 
     /* 初始化风扇 */
     ys4028b12h_cfg_t cfg = &my_ys4028b12h_config;
@@ -245,8 +249,10 @@ int main(void)
         float lower_bound = target_temperature - (HYSTERESIS_BAND / 2.0f);
         float upper_bound = target_temperature + (HYSTERESIS_BAND / 2.0f);
         if (current_temperature < lower_bound) ptc_state = PIN_HIGH;
-        else if (current_temperature > upper_bound) ptc_state = PIN_LOW;
+        else if (current_temperature > target_temperature) ptc_state = PIN_LOW;
+        else btm_ptc_state = PIN_HIGH;
         rt_pin_write(PTC_PIN, ptc_state);
+        rt_pin_write(BTM_PTC_PIN, btm_ptc_state);
 
         // 风扇控制逻辑
         feedforward_speed_last = 0.0f;

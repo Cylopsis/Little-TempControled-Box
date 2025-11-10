@@ -116,12 +116,16 @@ static void remote_server_thread_entry(void *parameter)
             {
                 const float fan_percent = final_fan_speed * 100.0f;
                 const char *ptc_state_str = (ptc_state == PIN_HIGH) ? "ON" : "OFF";
+                const char *btm_ptc_str = (btm_ptc_state == PIN_HIGH) ? "ON" : "OFF";
                 const char *ctrl_state_str = control_state_to_string(control_state);
 
                 int len = snprintf(send_buf, sizeof(send_buf), "{"\
                     "\"current_temperature\":%.2f,"\
                     "\"target_temperature\":%.2f,"\
+                    "\"current_humidity\":%.2f,"\
+                    "\"env_temperature\":%.2f,"\
                     "\"ptc_state\":\"%s\","\
+                    "\"btm_ptc_state\":\"%s\","\
                     "\"control_state\":\"%s\","\
                     "\"fan_speed\":%.4f,"\
                     "\"fan_speed_percent\":%.2f,"\
@@ -135,7 +139,10 @@ static void remote_server_thread_entry(void *parameter)
                     "}\r\n",
                     current_temperature,
                     target_temperature,
+                    current_humidity,
+                    env_temperature,
                     ptc_state_str,
+                    btm_ptc_str,
                     ctrl_state_str,
                     final_fan_speed,
                     fan_percent,
