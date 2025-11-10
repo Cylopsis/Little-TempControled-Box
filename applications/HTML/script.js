@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const scaleUpper = document.getElementById('scale-upper');
     const scaleLower = document.getElementById('scale-lower');
     const scaleMin = document.getElementById('scale-min');
+    const connectionStatus = document.getElementById('connection-status');
 
     const targetTemperatureInput = document.getElementById('target_temperature_input');
     const kpInput = document.getElementById('kp_input');
@@ -23,6 +24,8 @@ document.addEventListener('DOMContentLoaded', () => {
     let isFirstMessage = true;
     let minTempRange = 0;
     let maxTempRange = 80;
+    let pendingData = null;
+    let framePending = false;
 
     const formatters = {
         current_temperature: (v) => `${v.toFixed(2)} °C`,
@@ -53,6 +56,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // --- Utility Functions ---
     const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+    // Text update helper (no visual highlight)
+    function setText(el, newText) {
+        if (!el) return;
+        el.textContent = newText;
+    }
 
     function ensureRange(values) {
         let updated = false;
@@ -141,20 +150,22 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateDashboard(data) {
         Object.entries(data).forEach(([key, value]) => {
             const element = document.getElementById(key);
-            if (!element) {
-                return;
-            }
+            if (!element) return;
+
+            let text;
             if (typeof value === 'number') {
                 if (formatters[key]) {
-                    element.textContent = formatters[key](value);
+                    text = formatters[key](value);
                 } else if (Number.isInteger(value)) {
-                    element.textContent = value.toString();
+                    text = value.toString();
                 } else {
-                    element.textContent = value.toFixed(2);
+                    text = value.toFixed(2);
                 }
             } else {
-                element.textContent = value;
+                text = String(value);
             }
+
+            setText(element, text);
         });
     }
 
@@ -188,6 +199,10 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- WebSocket Handlers ---
     websocket.onopen = () => {
         console.log('Connected to WebSocket server');
+        if (connectionStatus) {
+            connectionStatus.innerHTML = '<i class="fas fa-circle connected"></i><span>Connected</span>';
+            connectionStatus.className = 'connection-status connected';
+        }
         renderFeedforwardTable();
     };
 
@@ -198,8 +213,22 @@ document.addEventListener('DOMContentLoaded', () => {
                 initializeControlPanel(data);
                 isFirstMessage = false;
             }
-            updateDashboard(data);
-            updateThermometer(data);
+            // Batch DOM updates to animation frames
+            pendingData = data;
+            if (!framePending) {
+                framePending = true;
+                requestAnimationFrame(() => {
+                    try {
+                        if (pendingData) {
+                            updateDashboard(pendingData);
+                            updateThermometer(pendingData);
+                            pendingData = null;
+                        }
+                    } finally {
+                        framePending = false;
+                    }
+                });
+            }
         } catch (error) {
             console.error('Error parsing JSON or updating UI:', error);
         }
@@ -207,10 +236,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
     websocket.onclose = () => {
         console.log('Disconnected from WebSocket server');
+        if (connectionStatus) {
+            connectionStatus.innerHTML = '<i class="fas fa-circle disconnected"></i><span>Disconnected</span>';
+            connectionStatus.className = 'connection-status disconnected';
+        }
     };
 
     websocket.onerror = (error) => {
         console.error('WebSocket Error:', error);
+        if (connectionStatus) {
+            connectionStatus.innerHTML = '<i class="fas fa-circle disconnected"></i><span>Error</span>';
+            connectionStatus.className = 'connection-status disconnected';
+        }
     };
 
     // --- Event Listeners ---
@@ -237,5 +274,27 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log(`Sending command: ${command}`);
             websocket.send(command);
         }
+    });
+
+    // Keyboard shortcuts: press Enter to submit
+    [kpInput, kiInput, kdInput].forEach((el) => {
+        if (el) {
+            el.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') setPidBtn.click();
+            });
+        }
+    });
+    if (targetTemperatureInput) {
+        targetTemperatureInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') setTargetBtn.click();
+        });
+    }
+
+    // Minimize controls: toggle widget content
+    document.querySelectorAll('.minimize-btn').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            const widget = btn.closest('.widget');
+            if (widget) widget.classList.toggle('minimized');
+        });
     });
 });
