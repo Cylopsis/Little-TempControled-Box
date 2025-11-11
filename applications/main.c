@@ -5,20 +5,18 @@
 #include <stdlib.h> // for atof()
 #include <string.h> // for strcmp()
 #include <system_vars.h>
-#include <math.h> // For fabsf()
+#include <math.h>   // For fabsf()
 
 /*******************************************************************************
  * 宏定义
  ******************************************************************************/
-#define LED_PIN        ((3*32)+12)      // 工作指示灯引脚
-#define PTC_PIN        ((2*32)+0)       // PTC恒温发热片继电器控制引脚
-#define BTM_PTC_PIN    ((0*32)+22)      // 底板PTC发热片继电器控制引脚
-#define DHT_DATA_PIN   ((2*32)+1)
-#define SAMPLE_PERIOD_MS    1000        // 控制周期/采样周期 (ms)
+#define LED_PIN             ((3*32)+12)      // 工作指示灯引脚
+#define PTC_PIN             ((2*32)+0)       // PTC恒温发热片继电器控制引脚
+#define BTM_PTC_PIN         ((0*32)+22)      // 底板PTC发热片继电器控制引脚
+#define DHT_DATA_PIN        ((2*32)+1)       // DHT11数据引脚
+#define SAMPLE_PERIOD_MS    1000             // 控制周期/采样周期 (ms)
 
-/* 温控逻辑相关宏 */
-#define HYSTERESIS_BAND     2.0f        // 迟滞范围 (+-1.0°C)
-#define FAN_SPEED_CIRCULATION 0.05f      // 加热时用于空气循环的低风速（待定，可能不需要）
+/* 温控逻辑相关枚举在 system_vars.h 中声明 */
 
 /*******************************************************************************
  * 全局变量
@@ -31,9 +29,17 @@ float current_humidity = 50.0f;       // 当前湿度值
 float current_temperature = 25.0f;    // 当前温度值
 float target_temperature = 25.0f;     // 目标温度值
 
+/* 温控与风扇参数，可通过 fan_tune 动态调整 */
+float warming_threshold = 3.3f;             // 慢加热阈值 (-3.3°C)
+float hysteresis_band = 0.7f;               // 迟滞范围 (+-0.7°C)
+float fan_speed_circulation = 0.00f;        // 加热时用于空气循环的低风速
+float fan_min = 0.00f;                      // 最小风速（非零时）
+float fan_max = 0.63f;                      // 最大风速
+float fan_smooth_alpha = 0.3f;              // 风扇命令平滑系数
+
 /* PID 控制器参数 */
-float KP = 0.0f;
-float KI = 0.0f;
+float KP = 0.03f;
+float KI = 0.002f;
 float KD = 0.0f;
 
 /* PID 控制器状态变量 */
@@ -46,53 +52,38 @@ rt_base_t btm_ptc_state = PIN_LOW;
 
 /* 控制状态与监控变量 */
 volatile control_state_t control_state = CONTROL_STATE_IDLE;
-float final_fan_speed = 0.0f;
+float final_fan_speed = 0.0f;          // 平滑后的风扇速度
+float fan_speed_cmd = 0.0f;            // 风扇命令（未平滑）
 float feedforward_speed_last = 0.0f;
 float pid_output_last = 0.0f;
 
 /*******************************************************************************
- * PID 增益调度与前馈
+ * 前馈速度表
  ******************************************************************************/
 typedef struct {
-    float temperature;
-    float kp;
-    float ki;
-    float kd;
-} pid_profile_t;
+    float delta_t;         // 目标温度 - 环境温度
+    float base_fan_speed;  // 对应的基础风速
+} ff_profile_t;
 
-const pid_profile_t gain_schedule_table[] = {
-    // {温度°C, Kp, Ki, Kd} - 初始占位值
-    {20.0f, 0.05f, 0.010f, 0.005f},
-    {30.0f, 0.06f, 0.012f, 0.006f},
-    {40.0f, 0.07f, 0.015f, 0.007f},
-    {50.0f, 0.08f, 0.018f, 0.008f},
-    {60.0f, 0.09f, 0.020f, 0.009f},
-};
-const int num_pid_profiles = sizeof(gain_schedule_table) / sizeof(gain_schedule_table[0]);
-
-typedef struct {
-    float temperature;
-    float base_fan_speed;   // 前馈风速
-} feedforward_profile_t;
-
-// --- 前馈速度表 ---
-// 概念: 维持某个高于室温的温度点，所需要的基础风扇转速 (用于散热)
-feedforward_profile_t ff_table[] = {
-    // {温度°C, 基础风速} - 待定，可能不需要前馈
-    {20.0f, 0.10f},
-    {30.0f, 0.10f},
-    {40.0f, 0.10f},
-    {50.0f, 0.10f},
-    {60.0f, 0.10f}
+// 基于 ΔT 的前馈表（需要根据实际测试微调）
+ff_profile_t ff_table[] = {
+    {  0.0f, 0.00f },     // 目标与环境相同，无需额外散热
+    {  5.0f, 0.05f },     
+    { 20.0f, 0.10f },     
+    { 30.0f, 0.20f },     
+    { 40.0f, 0.30f },     
+    { 50.0f, 0.40f }      
 };
 const int num_ff_profiles = sizeof(ff_table) / sizeof(ff_table[0]);
-
 
 /*******************************************************************************
  * 函数声明
  ******************************************************************************/
 void working_led();
+extern void remote_start(int argc, char **argv);
 void pid_tune(int argc, char **argv);
+void fan_tune(int argc, char **argv);
+float get_feedforward_speed(float target_temp, float env_temp);
 
 /*******************************************************************************
  * 函数定义
@@ -108,45 +99,24 @@ void working_led() {
     }
 }
 
-void update_pid_gains_by_target(float current_target_temp) {
-    int lower_index = -1, upper_index = -1;
-    for (int i = 0; i < num_pid_profiles; i++) {
-        if (gain_schedule_table[i].temperature <= current_target_temp) lower_index = i;
-        if (gain_schedule_table[i].temperature >= current_target_temp && upper_index == -1) upper_index = i;
-    }
+float get_feedforward_speed(float target_temp, float env_temp)
+{
+    float dt = target_temp - env_temp;
+    if (dt <= ff_table[0].delta_t) return ff_table[0].base_fan_speed;
+    if (dt >= ff_table[num_ff_profiles - 1].delta_t)
+        return ff_table[num_ff_profiles - 1].base_fan_speed;
 
-    if (lower_index == -1) { // 低于范围
-        KP = gain_schedule_table[0].kp; KI = gain_schedule_table[0].ki; KD = gain_schedule_table[0].kd;
-    } else if (upper_index == -1 || lower_index == upper_index) { // 高于范围或精确匹配
-        KP = gain_schedule_table[lower_index].kp; KI = gain_schedule_table[lower_index].ki; KD = gain_schedule_table[lower_index].kd;
-    } else { // 插值
-        const pid_profile_t* p_lower = &gain_schedule_table[lower_index];
-        const pid_profile_t* p_upper = &gain_schedule_table[upper_index];
-        float ratio = (current_target_temp - p_lower->temperature) / (p_upper->temperature - p_lower->temperature);
-        KP = p_lower->kp + ratio * (p_upper->kp - p_lower->kp);
-        KI = p_lower->ki + ratio * (p_upper->ki - p_lower->ki);
-        KD = p_lower->kd + ratio * (p_upper->kd - p_lower->kd);
+    for (int i = 0; i < num_ff_profiles - 1; i++)
+    {
+        ff_profile_t *a = &ff_table[i];
+        ff_profile_t *b = &ff_table[i + 1];
+        if (dt >= a->delta_t && dt <= b->delta_t)
+        {
+            float ratio = (dt - a->delta_t) / (b->delta_t - a->delta_t);
+            return a->base_fan_speed + ratio * (b->base_fan_speed - a->base_fan_speed);
+        }
     }
-}
-
-float get_feedforward_speed(float target_temp) {
-    int lower_index = -1, upper_index = -1;
-    for (int i = 0; i < num_ff_profiles; i++) {
-        if (ff_table[i].temperature <= target_temp) lower_index = i;
-        if (ff_table[i].temperature >= target_temp && upper_index == -1) upper_index = i;
-    }
-
-    if (lower_index == -1) {
-        return ff_table[0].base_fan_speed;
-    } else if (upper_index == -1 || lower_index == upper_index) {
-        return ff_table[lower_index].base_fan_speed;
-    } else {
-        const feedforward_profile_t* p_lower = &ff_table[lower_index];
-        const feedforward_profile_t* p_upper = &ff_table[upper_index];
-        if (p_upper->temperature == p_lower->temperature) return p_lower->base_fan_speed;
-        float ratio = (target_temp - p_lower->temperature) / (p_upper->temperature - p_lower->temperature);
-        return p_lower->base_fan_speed + ratio * (p_upper->base_fan_speed - p_lower->base_fan_speed);
-    }
+    return 0.0f; // 理论上不会走到这里
 }
 
 int main(void)
@@ -199,36 +169,29 @@ int main(void)
         }
     } else {
         rt_kprintf("DHT device not found.\n");
-    }
-
-    if (1 != rt_device_read(temp_dev, 0, &temp_data, 1)) 
-    {
-        rt_kprintf("Read temp data failed.\n");
-    }
-    else
-    {
-        rt_kprintf("[%d] Temp: %d\n", temp_data.timestamp, temp_data.data.temp);
-    }
-        
+    }        
     
     /* 初始化 PID 参数 */
     rt_kprintf("Initializing PID for default target: %.1f C\n", target_temperature);
-    update_pid_gains_by_target(target_temperature);
+    rt_kprintf("Initial PID: KP=%.3f, KI=%.3f, KD=%.3f\n", KP, KI, KD);
     pid_tune(1, RT_NULL); // 显示初始状态
 
     /* 连接 WiFi */
     rt_wlan_connect("142A_SecurityPlus", "142a8888");
+    rt_thread_mdelay(5000); // 等待连接稳定
+    /* 启动远程控制服务器 */
+    remote_start(0, RT_NULL);
 
     /***************************************************************************
      * 温控主循环
-     **************************************************************************/
+     ************************************************************************/
     while (1)
     {
         // 读取环境信息
         p3t1755_read_temp(&env_temperature);
         if (1 != rt_device_read(temp_dev, 0, &temp_data, 1)) 
         {
-            rt_kprintf("Read temp data failed.\n");
+            // DHT11特别容易读取失败，不打印，避免刷屏
             continue;
         }
         else
@@ -244,77 +207,121 @@ int main(void)
         {
             current_humidity = (float)(humi_data.data.humi) / 10.0f;
         }
+
+        // PTC逻辑
+        float lower_bound = target_temperature - hysteresis_band - warming_threshold;
+        float warming_bound = target_temperature - hysteresis_band / 2.0f;
+        float upper_bound = target_temperature + hysteresis_band;
+
+        if (current_temperature < lower_bound)
+        {
+            // 温度偏低
+            control_state = CONTROL_STATE_HEATING;
+            ptc_state = PIN_HIGH;
+            btm_ptc_state = PIN_HIGH;
+        }
+        else if (current_temperature < warming_bound)
+        {
+            // 在目标附近
+            control_state = CONTROL_STATE_WARMING;
+            ptc_state = PIN_LOW;
+            btm_ptc_state = PIN_HIGH;
+            
+        }
+        else if(control_state == CONTROL_STATE_WARMING && current_temperature > target_temperature + hysteresis_band/2.0)
+        {
+            control_state = CONTROL_STATE_IDLE;
+            ptc_state = PIN_LOW;
+            btm_ptc_state = PIN_LOW;
+        }
+        else if (control_state == CONTROL_STATE_COOLING && current_temperature < target_temperature)
+        {
+            control_state = CONTROL_STATE_IDLE;
+            ptc_state = PIN_LOW;
+            btm_ptc_state = PIN_LOW;
+        }
+        else if (current_temperature > upper_bound){
+            control_state = CONTROL_STATE_COOLING;
+            ptc_state = PIN_LOW;
+            btm_ptc_state = PIN_LOW;
+        }
         
-        // PTC加热器迟滞控制
-        float lower_bound = target_temperature - (HYSTERESIS_BAND / 2.0f);
-        float upper_bound = target_temperature + (HYSTERESIS_BAND / 2.0f);
-        if (current_temperature < lower_bound) ptc_state = PIN_HIGH;
-        else if (current_temperature > target_temperature) ptc_state = PIN_LOW;
-        else btm_ptc_state = PIN_HIGH;
         rt_pin_write(PTC_PIN, ptc_state);
         rt_pin_write(BTM_PTC_PIN, btm_ptc_state);
 
         // 风扇控制逻辑
+        fan_speed_cmd = fan_speed_circulation;
         feedforward_speed_last = 0.0f;
         pid_output_last = 0.0f;
-        final_fan_speed = 0.0f;
-        if (ptc_state == PIN_HIGH) 
+        float dt = SAMPLE_PERIOD_MS / 1000.0f;
+
+        // 加热阶段
+        if (control_state == CONTROL_STATE_HEATING)
         {
-            // --- 状态: 加热 ---
-            control_state = CONTROL_STATE_HEATING;
-            final_fan_speed = FAN_SPEED_CIRCULATION;
-            // 重置PID积分项，防止在加热模式下积分累积
+            fan_speed_cmd = fan_speed_circulation;
+            // 清PID，防止加热阶段积累影响后面冷却
             integral_error = 0.0f;
             previous_error = 0.0f;
-            rt_kprintf("Temp:%.2fC Env:%.2fC | HEATING | PTC: ON, Fan: %.0f%%\n", 
-                       current_temperature, env_temperature, final_fan_speed * 100);
+            
+            // rt_kprintf("Temp:%.2fC Env:%.2fC | HEATING | PTC:%d BTM:%d Fan:%.0f%%\n",
+            //            current_temperature, env_temperature,
+            //            ptc_state == PIN_HIGH, btm_ptc_state == PIN_HIGH,
+            //            fan_speed_cmd * 100.0f);
         }
-        else // ptc_state == PIN_LOW
+        else if (control_state == CONTROL_STATE_COOLING)
         {
-            // --- 状态: 冷却或保温 ---
-            if (current_temperature > target_temperature)
-            {
-                // --- 子状态: 主动冷却 (PID + Feedforward) ---
-                control_state = CONTROL_STATE_COOLING;
-                float error = current_temperature - target_temperature;
-                float dt = SAMPLE_PERIOD_MS / 1000.0f;
-
-                integral_error += error * dt;
-                float derivative_error = (error - previous_error) / dt;
-                
-                // PID 输出
-                float pid_output = (KP * error) + (KI * integral_error) + (KD * derivative_error);
-                previous_error = error;
-                pid_output_last = pid_output;
-
-                // 前馈与PID输出合并
-                float ff_speed = get_feedforward_speed(target_temperature);
-                feedforward_speed_last = ff_speed;
-                final_fan_speed = ff_speed + pid_output;
-
-                // 输出限幅与积分抗饱和
-                if (final_fan_speed > 1.0f) {
-                    final_fan_speed = 1.0f;
-                    integral_error -= error * dt; // 抗饱和
-                }
-                if (final_fan_speed < 0.0f) {
-                    final_fan_speed = 0.0f;
-                    integral_error -= error * dt; // 抗饱和
-                }
-                
-                rt_kprintf("Temp:%.2fC Env:%.2fC | COOLING | PTC: OFF, Fan: %.0f%% (FF:%.2f+PID:%.2f)\n",
-                           current_temperature, env_temperature, final_fan_speed * 100, ff_speed, pid_output);
+            // 非加热阶段
+            float error = current_temperature - target_temperature;
+            float derivative = (error - previous_error) / dt;
+            previous_error = error;
+            
+            integral_error += error * dt;
+            
+            // PID输出
+            float pid_output = KP * error + KI * integral_error + KD * derivative;
+            pid_output_last = pid_output;
+            
+            // 前馈与PID输出合并
+            float ff_speed = get_feedforward_speed(target_temperature, env_temperature);
+            feedforward_speed_last = ff_speed;
+            fan_speed_cmd = ff_speed + pid_output;
+            
+            // 限幅与抗积分饱和
+            if (fan_speed_cmd > fan_max) {
+                fan_speed_cmd = fan_max;
+                integral_error -= error * dt; // 抗饱和
             }
-            else
-            {
-                // --- 子状态: 保温/空闲 ---
-                control_state = CONTROL_STATE_IDLE;
-                final_fan_speed = FAN_SPEED_CIRCULATION;
-                rt_kprintf("Temp:%.2fC Env:%.2fC | IDLE    | PTC: OFF, Fan: %.0f%%\n", current_temperature, env_temperature, final_fan_speed * 100);
+            if (fan_speed_cmd < fan_min) {
+                fan_speed_cmd = fan_min;
+                integral_error -= error * dt;
             }
+            
+            // rt_kprintf("Temp:%.2fC Env:%.2fC | COOLING | Fan:%.0f%% (FF:%.2f PID:%.2f)\n",
+            //            current_temperature, env_temperature,
+            //            fan_speed_cmd * 100.0f, ff_speed, pid_output);
         }
-        
+        else if (control_state == CONTROL_STATE_WARMING)
+        {
+            // 目标附近
+            fan_speed_cmd = fan_speed_circulation;
+            // 在这个区域逐步衰减积分，防止偶尔进入冷却时带太大历史误差
+            integral_error *= 0.8f;
+            
+            // rt_kprintf("Temp:%.2fC Env:%.2fC | IDLE    | Fan:%.0f%%\n",
+            //             current_temperature, env_temperature,
+            //             fan_speed_cmd * 100.0f);
+        }
+
+        // 简单一阶滤波，避免PWM抖动
+        final_fan_speed = final_fan_speed * (1.0f - fan_smooth_alpha)
+                        + fan_speed_cmd   * fan_smooth_alpha;
+
+        // 安全限幅
+        if (final_fan_speed > fan_max) final_fan_speed = fan_max;
+        if (final_fan_speed < fan_min) final_fan_speed = fan_min;
+
         ys4028b12h_set_speed(cfg, final_fan_speed);
+        
         rt_thread_mdelay(SAMPLE_PERIOD_MS);
     }
     
@@ -322,13 +329,14 @@ int main(void)
 }
 
 /*******************************************************************************
- * MSH 命令
+ * MSH 命令（调试用的）
  ******************************************************************************/
 static const char *control_state_to_string(control_state_t state)
 {
     switch (state)
     {
         case CONTROL_STATE_HEATING: return "HEATING";
+        case CONTROL_STATE_WARMING: return "WARMING";
         case CONTROL_STATE_COOLING: return "COOLING";
         case CONTROL_STATE_IDLE:
         default:
@@ -336,22 +344,157 @@ static const char *control_state_to_string(control_state_t state)
     }
 }
 
+static void print_fan_control_params(void)
+{
+    rt_kprintf("--- Fan Control Parameters ---\n");
+    rt_kprintf("Warming Threshold:    %.3f C\n", warming_threshold);
+    rt_kprintf("Hysteresis Band:      %.3f C\n", hysteresis_band);
+    rt_kprintf("Circulation Speed:    %.3f\n", fan_speed_circulation);
+    rt_kprintf("Fan Min:              %.3f\n", fan_min);
+    rt_kprintf("Fan Max:              %.3f\n", fan_max);
+    rt_kprintf("Smooth Alpha:         %.3f\n", fan_smooth_alpha);
+}
+
 static void get_status(int argc, char **argv)
 {
     rt_kprintf("--- System Status ---\n");
     rt_kprintf("Current Temperature:  %.2f C\n", current_temperature);
     rt_kprintf("Target Temperature:   %.2f C\n", target_temperature);
+    rt_kprintf("Env Temperature:      %.2f C\n", env_temperature);
     rt_kprintf("PTC Heater State:     %s\n", (ptc_state == PIN_HIGH) ? "ON" : "OFF");
+    rt_kprintf("Bottom PTC State:     %s\n", (btm_ptc_state == PIN_HIGH) ? "ON" : "OFF");
     rt_kprintf("Control State:        %s\n", control_state_to_string(control_state));
     rt_kprintf("Fan Command:          %.1f %%\n", final_fan_speed * 100.0f);
     rt_kprintf("--- PID Controller ---\n");
-    rt_kprintf("Scheduled Gains: Kp=%.6f, Ki=%.6f, Kd=%.6f\n", KP, KI, KD);
+    rt_kprintf("Gains: Kp=%.6f, Ki=%.6f, Kd=%.6f\n", KP, KI, KD);
     rt_kprintf("Integral Error:  %.4f\n", integral_error);
     rt_kprintf("Previous Error:  %.4f\n", previous_error);
     rt_kprintf("Feedforward Spd: %.4f\n", feedforward_speed_last);
     rt_kprintf("PID Output:      %.4f\n", pid_output_last);
+    print_fan_control_params();
 }
 MSH_CMD_EXPORT(get_status, Get current system status for temperature control);
+
+void fan_tune(int argc, char **argv)
+{
+    if (argc < 2) {
+        rt_kprintf("\n--- Usage ---\n");
+        rt_kprintf("  fan_tune -show\n");
+        rt_kprintf("  fan_tune -warm <val> -hys <val>\n");
+        rt_kprintf("           -circ <val> -min <val> -max <val> -alpha <val>\n");
+        print_fan_control_params();
+        return;
+    }
+
+    float new_warming_threshold = warming_threshold;
+    float new_hysteresis_band = hysteresis_band;
+    float new_fan_speed_circulation = fan_speed_circulation;
+    float new_fan_min = fan_min;
+    float new_fan_max = fan_max;
+    float new_fan_smooth_alpha = fan_smooth_alpha;
+
+    rt_bool_t updated = RT_FALSE;
+    rt_bool_t show_requested = RT_FALSE;
+
+    int idx = 1;
+    while (idx < argc) {
+        const char *opt = argv[idx];
+
+        if (strcmp(opt, "-show") == 0) {
+            show_requested = RT_TRUE;
+            idx += 1;
+            continue;
+        }
+
+        if (idx + 1 >= argc) {
+            rt_kprintf("Error: Option %s requires a value.\n", opt);
+            return;
+        }
+
+        const char *value_str = argv[idx + 1];
+        float value = atof(value_str);
+
+        if (strcmp(opt, "-warm") == 0) {
+            if (value < 0.0f) {
+                rt_kprintf("Error: warming threshold must be >= 0.\n");
+                return;
+            }
+            new_warming_threshold = value;
+            updated = RT_TRUE;
+        } else if (strcmp(opt, "-hys") == 0) {
+            if (value < 0.0f) {
+                rt_kprintf("Error: hysteresis band must be >= 0.\n");
+                return;
+            }
+            new_hysteresis_band = value;
+            updated = RT_TRUE;
+        } else if (strcmp(opt, "-circ") == 0) {
+            if (value < 0.0f || value > 1.0f) {
+                rt_kprintf("Error: circulation speed must be within [0, 1].\n");
+                return;
+            }
+            new_fan_speed_circulation = value;
+            updated = RT_TRUE;
+        } else if (strcmp(opt, "-min") == 0) {
+            if (value < 0.0f || value > 1.0f) {
+                rt_kprintf("Error: fan_min must be within [0, 1].\n");
+                return;
+            }
+            new_fan_min = value;
+            updated = RT_TRUE;
+        } else if (strcmp(opt, "-max") == 0) {
+            if (value < 0.0f || value > 1.0f) {
+                rt_kprintf("Error: fan_max must be within [0, 1].\n");
+                return;
+            }
+            new_fan_max = value;
+            updated = RT_TRUE;
+        } else if (strcmp(opt, "-alpha") == 0) {
+            if (value < 0.0f || value > 1.0f) {
+                rt_kprintf("Error: smooth alpha must be within [0, 1].\n");
+                return;
+            }
+            new_fan_smooth_alpha = value;
+            updated = RT_TRUE;
+        } else {
+            rt_kprintf("Error: Unknown option %s\n", opt);
+            return;
+        }
+
+        idx += 2;
+    }
+
+    if (!updated) {
+        if (show_requested) {
+            print_fan_control_params();
+            return;
+        }
+        rt_kprintf("No parameters updated. Use -show to display current settings.\n");
+        return;
+    }
+
+    if (new_fan_min > new_fan_max) {
+        rt_kprintf("Error: fan_min (%.3f) cannot exceed fan_max (%.3f).\n", new_fan_min, new_fan_max);
+        return;
+    }
+
+    if (new_fan_speed_circulation < new_fan_min || new_fan_speed_circulation > new_fan_max) {
+        rt_kprintf("Error: circulation speed %.3f must be within [%.3f, %.3f].\n",
+                   new_fan_speed_circulation, new_fan_min, new_fan_max);
+        return;
+    }
+
+    warming_threshold = new_warming_threshold;
+    hysteresis_band = new_hysteresis_band;
+    fan_speed_circulation = new_fan_speed_circulation;
+    fan_min = new_fan_min;
+    fan_max = new_fan_max;
+    fan_smooth_alpha = new_fan_smooth_alpha;
+
+    rt_kprintf("Fan control parameters updated.\n");
+    print_fan_control_params();
+}
+MSH_CMD_EXPORT(fan_tune, Tune fan control parameters at runtime);
 
 void pid_tune(int argc, char **argv)
 {
@@ -360,25 +503,25 @@ void pid_tune(int argc, char **argv)
         rt_kprintf("  pid_tune -t <val>                    (Set target temperature in C)\n");
         rt_kprintf("  pid_tune -p <val> -i <val> -d <val>  (Manual PID override)\n");
         rt_kprintf("  pid_tune -ff                         (Show Feedforward table)\n");
-        rt_kprintf("  pid_tune -ff_set <idx> <temp> <spd>  (Set Feedforward entry)\n");
-        rt_kprintf("    e.g., pid_tune -ff_set 2 40.0 0.25\n");
+        rt_kprintf("  pid_tune -ff_set <idx> <dt> <spd>    (Set Feedforward entry)\n");
+        rt_kprintf("    e.g., pid_tune -ff_set 2 15.0 0.20\n");
         get_status(1, RT_NULL);
         return;
     }
 
     if (strcmp(argv[1], "-ff") == 0) {
-        rt_kprintf("--- Feedforward Table ---\n");
-        rt_kprintf("Idx | Temp (C) | Base Speed\n");
-        rt_kprintf("----|----------|-----------\n");
+        rt_kprintf("--- Feedforward Table (ΔT -> base fan speed) ---\n");
+        rt_kprintf("Idx | ΔT(C) | Base Speed\n");
+        rt_kprintf("----|--------|----------\n");
         for (int i = 0; i < num_ff_profiles; i++) {
-            rt_kprintf("%-3d | %-8.1f | %.4f\n", i, ff_table[i].temperature, ff_table[i].base_fan_speed);
+            rt_kprintf("%-3d | %-6.1f | %.4f\n", i, ff_table[i].delta_t, ff_table[i].base_fan_speed);
         }
         return;
     }
 
     if (strcmp(argv[1], "-ff_set") == 0) {
         if (argc != 5) {
-            rt_kprintf("Error: Incorrect arguments. Usage: pid_tune -ff_set <idx> <temp> <spd>\n");
+            rt_kprintf("Error: Incorrect arguments. Usage: pid_tune -ff_set <idx> <dt> <spd>\n");
             return;
         }
         int index = atoi(argv[2]);
@@ -386,28 +529,26 @@ void pid_tune(int argc, char **argv)
             rt_kprintf("Error: Index %d is out of bounds (0-%d).\n", index, num_ff_profiles - 1);
             return;
         }
-        ff_table[index].temperature = atof(argv[3]);
+        ff_table[index].delta_t = atof(argv[3]);
         ff_table[index].base_fan_speed = atof(argv[4]);
-        rt_kprintf("FF table entry %d updated to: Temp=%.1fC, Speed=%.4f\n", index, ff_table[index].temperature, ff_table[index].base_fan_speed);
+        rt_kprintf("FF table entry %d updated to: ΔT=%.1fC, Speed=%.4f\n", 
+                   index, ff_table[index].delta_t, ff_table[index].base_fan_speed);
         return;
     }
     
-    rt_bool_t target_changed = RT_FALSE;
+    // rt_bool_t target_changed = RT_FALSE;
     for (int i = 1; i < argc; i += 2) {
         if (strcmp(argv[i], "-p") == 0) { KP = atof(argv[i+1]); }
         else if (strcmp(argv[i], "-i") == 0) { KI = atof(argv[i+1]); }
         else if (strcmp(argv[i], "-d") == 0) { KD = atof(argv[i+1]); }
         else if (strcmp(argv[i], "-t") == 0) {
             target_temperature = atof(argv[i+1]);
-            target_changed = RT_TRUE;
+            // target_changed = RT_TRUE;
         }
         else { rt_kprintf("Error: Unknown option %s\n", argv[i]); return; }
     }
 
-    if (target_changed) {
-        rt_kprintf("Target temperature changed. Re-scheduling PID gains...\n");
-        update_pid_gains_by_target(target_temperature);
-    }
+    // 移除了增益调度相关，target_changed不再影响PID参数
     
     rt_kprintf("Parameters updated. Current status:\n");
     get_status(1, RT_NULL);

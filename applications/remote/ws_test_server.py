@@ -118,6 +118,12 @@ async def client_handler(websocket, path, interval):
     feedforward_speed = interpolate_feedforward(ff_table, target_temperature)
     pid_output = 0.0
     last_update = t0
+    warming_threshold = 3.0
+    hysteresis_band = 1.0
+    fan_speed_circulation = 0.05
+    fan_min = 0.05
+    fan_max = 0.63
+    fan_smooth_alpha = 0.3
 
     def build_status():
         fan_speed = clamp(feedforward_speed + pid_output, 0.0, 1.0)
@@ -137,7 +143,13 @@ async def client_handler(websocket, path, interval):
             "pid_ki": round(ki, 6),
             "pid_kd": round(kd, 6),
             "integral_error": round(integral_error, 4),
-            "previous_error": round(previous_error, 4)
+            "previous_error": round(previous_error, 4),
+            "warming_threshold": round(warming_threshold, 4),
+            "hysteresis_band": round(hysteresis_band, 4),
+            "fan_speed_circulation": round(fan_speed_circulation, 4),
+            "fan_min": round(fan_min, 4),
+            "fan_max": round(fan_max, 4),
+            "fan_smooth_alpha": round(fan_smooth_alpha, 4)
         }
 
     async def send_console(lines):
@@ -164,6 +176,8 @@ async def client_handler(websocket, path, interval):
         nonlocal ptc_state, btm_ptc_state, control_state
         nonlocal pid_output, feedforward_speed, integral_error, previous_error
         nonlocal target_temperature, kp, ki, kd, ff_table, last_update
+        nonlocal warming_threshold, hysteresis_band
+        nonlocal fan_speed_circulation, fan_min, fan_max, fan_smooth_alpha
 
         while True:
             loop = asyncio.get_event_loop()
@@ -238,95 +252,203 @@ async def client_handler(websocket, path, interval):
             if not tokens:
                 continue
 
-            if tokens[0] != "pid_tune":
-                await send_console([f"Error: Unknown command '{tokens[0]}'"])
-                continue
+            if tokens[0] == "pid_tune":
+                args = tokens[1:]
+                if not args:
+                    await send_console([
+                        "--- Usage ---",
+                        "pid_tune -t <val>",
+                        "pid_tune -p <val> -i <val> -d <val>",
+                        "pid_tune -ff",
+                        "pid_tune -ff_set <idx> <temp> <spd>"
+                    ])
+                    await websocket.send(json.dumps(build_status()))
+                    continue
 
-            args = tokens[1:]
-            if not args:
-                await send_console([
-                    "--- Usage ---",
-                    "pid_tune -t <val>",
-                    "pid_tune -p <val> -i <val> -d <val>",
-                    "pid_tune -ff",
-                    "pid_tune -ff_set <idx> <temp> <spd>"
-                ])
+                if args[0] == "-ff":
+                    await send_console(format_ff_table())
+                    continue
+
+                if args[0] == "-ff_set":
+                    if len(args) != 4:
+                        await send_console(["Error: Usage pid_tune -ff_set <idx> <temp> <spd>"])
+                        continue
+                    try:
+                        index = int(args[1])
+                        temp_val = float(args[2])
+                        speed_val = float(args[3])
+                    except ValueError:
+                        await send_console(["Error: Invalid numeric value in -ff_set"])
+                        continue
+
+                    if index < 0 or index >= len(ff_table):
+                        await send_console([f"Error: Index {index} out of bounds (0-{len(ff_table)-1})."])
+                        continue
+
+                    ff_table[index]["temperature"] = temp_val
+                    ff_table[index]["base_speed"] = clamp(speed_val, 0.0, 1.0)
+                    await send_console([f"FF table entry {index} updated: Temp={temp_val:.1f}C, Speed={speed_val:.4f}"])
+                    feedforward_speed = interpolate_feedforward(ff_table, target_temperature)
+                    continue
+
+                # remaining options should come in pairs
+                if len(args) % 2 != 0:
+                    await send_console(["Error: Expected option/value pairs."])
+                    continue
+
+                target_changed = False
+                manual_override = False
+                idx = 0
+                parse_error = None
+                while idx < len(args):
+                    flag = args[idx]
+                    value = args[idx + 1]
+                    try:
+                        if flag == "-p":
+                            kp = float(value)
+                            manual_override = True
+                        elif flag == "-i":
+                            ki = float(value)
+                            manual_override = True
+                        elif flag == "-d":
+                            kd = float(value)
+                            manual_override = True
+                        elif flag == "-t":
+                            target_temperature = float(value)
+                            target_changed = True
+                        else:
+                            parse_error = f"Error: Unknown option {flag}"
+                            break
+                    except ValueError:
+                        parse_error = f"Error: Invalid value for {flag}: {value}"
+                        break
+                    idx += 2
+
+                if parse_error:
+                    await send_console([parse_error])
+                    continue
+
+                if target_changed:
+                    kp, ki, kd = interpolate_pid(target_temperature)
+                    await send_console(["Target temperature changed. Re-scheduling PID gains..."])
+
+                if manual_override and not target_changed:
+                    await send_console(["PID gains updated via manual override."])
+
+                feedforward_speed = interpolate_feedforward(ff_table, target_temperature)
+                await send_console(["Parameters updated. Current status:"])
                 await websocket.send(json.dumps(build_status()))
                 continue
 
-            if args[0] == "-ff":
-                await send_console(format_ff_table())
-                continue
-
-            if args[0] == "-ff_set":
-                if len(args) != 4:
-                    await send_console(["Error: Usage pid_tune -ff_set <idx> <temp> <spd>"])
-                    continue
-                try:
-                    index = int(args[1])
-                    temp_val = float(args[2])
-                    speed_val = float(args[3])
-                except ValueError:
-                    await send_console(["Error: Invalid numeric value in -ff_set"])
+            if tokens[0] == "fan_tune":
+                args = tokens[1:]
+                if not args:
+                    await send_console([
+                        "--- Usage ---",
+                        "fan_tune -show",
+                        "fan_tune -warm <val> -hys <val> -circ <val> -min <val> -max <val> -alpha <val>"
+                    ])
                     continue
 
-                if index < 0 or index >= len(ff_table):
-                    await send_console([f"Error: Index {index} out of bounds (0-{len(ff_table)-1})."])
+                if len(args) == 1 and args[0] == "-show":
+                    await send_console([
+                        "--- Fan Control Parameters ---",
+                        f"Warming Threshold: {warming_threshold:.3f}",
+                        f"Hysteresis Band: {hysteresis_band:.3f}",
+                        f"Circulation Speed: {fan_speed_circulation:.4f}",
+                        f"Fan Min: {fan_min:.4f}",
+                        f"Fan Max: {fan_max:.4f}",
+                        f"Smooth Alpha: {fan_smooth_alpha:.4f}"
+                    ])
+                    await websocket.send(json.dumps(build_status()))
                     continue
 
-                ff_table[index]["temperature"] = temp_val
-                ff_table[index]["base_speed"] = clamp(speed_val, 0.0, 1.0)
-                await send_console([f"FF table entry {index} updated: Temp={temp_val:.1f}C, Speed={speed_val:.4f}"])
-                feedforward_speed = interpolate_feedforward(ff_table, target_temperature)
-                continue
+                if len(args) % 2 != 0:
+                    await send_console(["Error: Expected option/value pairs."])
+                    continue
 
-            # remaining options should come in pairs
-            if len(args) % 2 != 0:
-                await send_console(["Error: Expected option/value pairs."])
-                continue
-
-            target_changed = False
-            manual_override = False
-            idx = 0
-            parse_error = None
-            while idx < len(args):
-                flag = args[idx]
-                value = args[idx + 1]
-                try:
-                    if flag == "-p":
-                        kp = float(value)
-                        manual_override = True
-                    elif flag == "-i":
-                        ki = float(value)
-                        manual_override = True
-                    elif flag == "-d":
-                        kd = float(value)
-                        manual_override = True
-                    elif flag == "-t":
-                        target_temperature = float(value)
-                        target_changed = True
-                    else:
-                        parse_error = f"Error: Unknown option {flag}"
+                new_warm = warming_threshold
+                new_hys = hysteresis_band
+                new_circ = fan_speed_circulation
+                new_min = fan_min
+                new_max = fan_max
+                new_alpha = fan_smooth_alpha
+                parse_error = None
+                idx = 0
+                while idx < len(args):
+                    flag = args[idx]
+                    value = args[idx + 1]
+                    try:
+                        if flag == "-warm":
+                            new_warm = float(value)
+                            if new_warm < 0.0:
+                                parse_error = "Error: warming threshold must be >= 0."
+                                break
+                        elif flag == "-hys":
+                            new_hys = float(value)
+                            if new_hys < 0.0:
+                                parse_error = "Error: hysteresis band must be >= 0."
+                                break
+                        elif flag == "-circ":
+                            new_circ = float(value)
+                        elif flag == "-min":
+                            new_min = float(value)
+                        elif flag == "-max":
+                            new_max = float(value)
+                        elif flag == "-alpha":
+                            new_alpha = float(value)
+                        else:
+                            parse_error = f"Error: Unknown option {flag}"
+                            break
+                    except ValueError:
+                        parse_error = f"Error: Invalid value for {flag}: {value}"
                         break
-                except ValueError:
-                    parse_error = f"Error: Invalid value for {flag}: {value}"
-                    break
-                idx += 2
+                    idx += 2
 
-            if parse_error:
-                await send_console([parse_error])
+                if parse_error:
+                    await send_console([parse_error])
+                    continue
+
+                def within01(name, val):
+                    if not 0.0 <= val <= 1.0:
+                        return f"Error: {name} must be within [0, 1]."
+                    return None
+
+                range_error = None
+                for label, val in [
+                    ("circulation speed", new_circ),
+                    ("fan_min", new_min),
+                    ("fan_max", new_max),
+                    ("smooth alpha", new_alpha)
+                ]:
+                    err = within01(label, val)
+                    if err:
+                        range_error = err
+                        break
+
+                if range_error:
+                    await send_console([range_error])
+                    continue
+
+                if new_min > new_max:
+                    await send_console([f"Error: fan_min ({new_min:.3f}) cannot exceed fan_max ({new_max:.3f})."])
+                    continue
+                if not new_min <= new_circ <= new_max:
+                    await send_console([f"Error: circulation speed {new_circ:.3f} must be within [{new_min:.3f}, {new_max:.3f}]."])
+                    continue
+
+                warming_threshold = new_warm
+                hysteresis_band = new_hys
+                fan_speed_circulation = new_circ
+                fan_min = new_min
+                fan_max = new_max
+                fan_smooth_alpha = new_alpha
+
+                await send_console(["Fan control parameters updated."])
+                await websocket.send(json.dumps(build_status()))
                 continue
 
-            if target_changed:
-                kp, ki, kd = interpolate_pid(target_temperature)
-                await send_console(["Target temperature changed. Re-scheduling PID gains..."])
-
-            if manual_override and not target_changed:
-                await send_console(["PID gains updated via manual override."])
-
-            feedforward_speed = interpolate_feedforward(ff_table, target_temperature)
-            await send_console(["Parameters updated. Current status:"])
-            await websocket.send(json.dumps(build_status()))
+            await send_console([f"Error: Unknown command '{tokens[0]}'"])
     except websockets.exceptions.ConnectionClosed:
         pass
     finally:

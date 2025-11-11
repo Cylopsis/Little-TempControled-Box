@@ -8,9 +8,9 @@
 #include "drv_pin.h"
 
 #define SERVER_PORT     5000    // 服务器监听的端口
-#define RECV_BUFSZ      128     // 接收缓冲区大小
-#define SEND_BUFSZ      512     // 发送缓冲区大小
-#define MAX_ARGS        8       // 命令行参数最大数量
+#define RECV_BUFSZ      256     // 接收缓冲区大小
+#define SEND_BUFSZ      1024    // 发送缓冲区大小
+#define MAX_ARGS        16      // 命令行参数最大数量
 
 static rt_thread_t server_thread = RT_NULL;
 
@@ -19,6 +19,7 @@ static const char *control_state_to_string(control_state_t state)
     switch (state)
     {
     case CONTROL_STATE_HEATING: return "HEATING";
+    case CONTROL_STATE_WARMING: return "WARMING";
     case CONTROL_STATE_COOLING: return "COOLING";
     case CONTROL_STATE_IDLE:
     default:
@@ -135,7 +136,13 @@ static void remote_server_thread_entry(void *parameter)
                     "\"pid_ki\":%.6f,"\
                     "\"pid_kd\":%.6f,"\
                     "\"integral_error\":%.4f,"\
-                    "\"previous_error\":%.4f"\
+                    "\"previous_error\":%.4f,"\
+                    "\"warming_threshold\":%.4f,"\
+                    "\"hysteresis_band\":%.4f,"\
+                    "\"fan_speed_circulation\":%.4f,"\
+                    "\"fan_min\":%.4f,"\
+                    "\"fan_max\":%.4f,"\
+                    "\"fan_smooth_alpha\":%.4f"\
                     "}\r\n",
                     current_temperature,
                     target_temperature,
@@ -150,7 +157,13 @@ static void remote_server_thread_entry(void *parameter)
                     pid_output_last,
                     KP, KI, KD,
                     integral_error,
-                    previous_error);
+                    previous_error,
+                    warming_threshold,
+                    hysteresis_band,
+                    fan_speed_circulation,
+                    fan_min,
+                    fan_max,
+                    fan_smooth_alpha);
 
                 if (len < 0 || len >= SEND_BUFSZ)
                 {
@@ -172,6 +185,13 @@ static void remote_server_thread_entry(void *parameter)
                 const char ok_msg[] = "OK\r\n";
                 send(connected, ok_msg, sizeof(ok_msg) - 1, 0);
             }
+            else if (strcmp(argv[0], "fan_tune") == 0)
+            {
+                fan_tune(argc, argv);
+
+                const char ok_msg[] = "OK\r\n";
+                send(connected, ok_msg, sizeof(ok_msg) - 1, 0);
+            }
             else
             {
                 // 对于未知命令，发送错误信息
@@ -189,7 +209,8 @@ __exit:
 /**
  * @brief MSH命令，用于启动远程控制服务器线程
  */
-static void remote_start(int argc, char **argv)
+
+void remote_start(int argc, char **argv)
 {
     if (server_thread != RT_NULL)
     {

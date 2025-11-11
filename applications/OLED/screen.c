@@ -19,20 +19,31 @@ void screen_on()
     u8g2_SetFont(&u8g2, u8g2_font_ncenB08_tr);
     while (1)
     {
-        if(ptc_state == PIN_HIGH)
-            sprintf(buf, "HEATING");
-        else if(btm_ptc_state == PIN_HIGH)
-            sprintf(buf, "WARMING");
-        else
-            sprintf(buf, "IDLE");
+        switch (control_state)
+        {
+            case CONTROL_STATE_HEATING:
+                rt_sprintf(buf, "HEATING");
+                break;
+            case CONTROL_STATE_COOLING:
+                rt_sprintf(buf, "COOLING");
+                break;
+            case CONTROL_STATE_IDLE:
+                rt_sprintf(buf, "IDLE");
+                break;
+            case CONTROL_STATE_WARMING:
+                rt_sprintf(buf, "WARMING");
+                break;
+            default:
+                break;
+        }
         u8g2_DrawStr(&u8g2, 10, 18, buf);
-        sprintf(buf, "Current Temp: %.2f C", current_temperature);
+        rt_sprintf(buf, "Current Temp: %.2f C", current_temperature);
         u8g2_DrawStr(&u8g2, 10, 36, buf);
-        sprintf(buf, "Target Temp:  %.2f C", target_temperature);
+        rt_sprintf(buf, "Target Temp:  %.2f C", target_temperature);
         u8g2_DrawStr(&u8g2, 10, 54, buf);
-        sprintf(buf, "Env Temp:     %.2f C", env_temperature);
+        rt_sprintf(buf, "Env Temp:     %.2f C", env_temperature);
         u8g2_DrawStr(&u8g2, 10, 72, buf);
         u8g2_SendBuffer(&u8g2);
-        rt_thread_mdelay(500);
+        rt_thread_mdelay(1000);
     }
 }

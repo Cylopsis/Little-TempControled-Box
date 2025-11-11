@@ -4,15 +4,22 @@
 #include <rtthread.h>
 
 typedef enum {
-    CONTROL_STATE_IDLE = 0,
-    CONTROL_STATE_HEATING,
-    CONTROL_STATE_COOLING
+	CONTROL_STATE_IDLE = 0,
+	CONTROL_STATE_HEATING,
+	CONTROL_STATE_WARMING,
+	CONTROL_STATE_COOLING
 } control_state_t;
 
 extern float env_temperature;        // 环境温度
 extern float current_humidity;       // 当前湿度值
 extern float current_temperature;    // 当前温度值
 extern float target_temperature;     // 目标温度值
+extern float warming_threshold;      // 慢加热阈值
+extern float hysteresis_band;        // 迟滞范围
+extern float fan_speed_circulation;  // 循环风速
+extern float fan_min;                // 风扇最小速度
+extern float fan_max;                // 风扇最大速度
+extern float fan_smooth_alpha;       // 风扇平滑系数
 extern float KP;
 extern float KI;
 extern float KD;
@@ -27,8 +34,10 @@ extern float pid_output_last;        // 最近一次PID输出
 
 // 控制接口
 void update_pid_gains_by_target(float current_target_temp);
-float get_feedforward_speed(float target_temp);
+float get_feedforward_speed(float target_temp, float env_temp);
 void pid_tune(int argc, char **argv);
+void fan_tune(int argc, char **argv);
+extern void remote_start(int argc, char **argv);
 
 // OLED显示
 void screen_on();
