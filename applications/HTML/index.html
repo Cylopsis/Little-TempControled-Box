@@ -8,14 +8,17 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
 </head>
 <body>
-  <div class="header">
-    <h1><i class="fas fa-thermometer-half"></i> Temperature Chamber Dashboard</h1>
-    <div id="connection-status" class="connection-status"><i class="fas fa-circle disconnected"></i><span>Disconnected</span></div>
-  </div>
+  <div class="page-container">
+    <section class="page-section overview-section" id="overview-section">
+      <div class="page-inner">
+        <div class="header">
+          <h1><i class="fas fa-thermometer-half"></i> Temperature Chamber Dashboard</h1>
+          <div id="connection-status" class="connection-status"><i class="fas fa-circle disconnected"></i><span>Disconnected</span></div>
+        </div>
 
-  <div id="layout-container" class="layout-container">
+        <div id="layout-container" class="layout-container">
 
-    <div class="widget draggable" data-widget="thermometer">
+          <div class="widget draggable" data-widget="thermometer">
       <div class="widget-header">
         <h2><i class="fas fa-thermometer-half"></i> Live Thermal View</h2>
         <div class="widget-controls">
@@ -47,139 +50,202 @@
       </div>
     </div>
 
-    <div class="widget draggable" data-widget="metrics">
+          <div class="widget draggable" data-widget="metrics">
       <div class="widget-header">
         <h2><i class="fas fa-chart-line"></i> Real-time Metrics</h2>
         <div class="widget-controls">
           <button class="minimize-btn"><i class="fas fa-minus"></i></button>
         </div>
       </div>
-      <div class="widget-content">
-        <div class="grid-container">
-          <div class="metric-card">
-            <div class="metric-icon"><i class="fas fa-temperature-high"></i></div>
-            <div class="metric-info">
-              <span class="label">Current Temperature:</span>
-              <span id="current_temperature" class="value">--</span>
+      <div class="widget-content metrics-content scrollable">
+        <div class="metrics-section">
+          <h3><i class="fas fa-temperature-half"></i> Sensors</h3>
+          <div class="grid-container">
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-temperature-high"></i></div>
+              <div class="metric-info">
+                <span class="label">Current Temperature:</span>
+                <span id="current_temperature" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-bullseye"></i></div>
+              <div class="metric-info">
+                <span class="label">Target Temperature:</span>
+                <span id="target_temperature" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-tint"></i></div>
+              <div class="metric-info">
+                <span class="label">Current Humidity:</span>
+                <span id="current_humidity" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-thermometer-empty"></i></div>
+              <div class="metric-info">
+                <span class="label">Environment Temperature:</span>
+                <span id="env_temperature" class="value">--</span>
+              </div>
             </div>
           </div>
-          <div class="metric-card">
-            <div class="metric-icon"><i class="fas fa-bullseye"></i></div>
-            <div class="metric-info">
-              <span class="label">Target Temperature:</span>
-              <span id="target_temperature" class="value">--</span>
+        </div>
+
+        <div class="metrics-section">
+          <h3><i class="fas fa-fire"></i> Heating State</h3>
+          <div class="grid-container">
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-fire"></i></div>
+              <div class="metric-info">
+                <span class="label">PTC Heater:</span>
+                <span id="ptc_state" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-fire"></i></div>
+              <div class="metric-info">
+                <span class="label">Bottom Heater:</span>
+                <span id="btm_ptc_state" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-stream"></i></div>
+              <div class="metric-info">
+                <span class="label">Control State:</span>
+                <span id="control_state" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-temperature-low"></i></div>
+              <div class="metric-info">
+                <span class="label">Warming Threshold:</span>
+                <span id="warming_threshold" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-arrows-alt-v"></i></div>
+              <div class="metric-info">
+                <span class="label">Hysteresis Band:</span>
+                <span id="hysteresis_band" class="value">--</span>
+              </div>
             </div>
           </div>
-          <div class="metric-card">
-            <div class="metric-icon"><i class="fas fa-tint"></i></div>
-            <div class="metric-info">
-              <span class="label">Current Humidity:</span>
-              <span id="current_humidity" class="value">--</span>
+        </div>
+
+        <div class="metrics-section">
+          <h3><i class="fas fa-fan"></i> Fan Control</h3>
+          <div class="grid-container">
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-fan"></i></div>
+              <div class="metric-info">
+                <span class="label">Fan Output (%):</span>
+                <span id="fan_speed_percent" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-fan"></i></div>
+              <div class="metric-info">
+                <span class="label">Fan Output (0-1):</span>
+                <span id="fan_speed" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-forward"></i></div>
+              <div class="metric-info">
+                <span class="label">Feedforward Speed:</span>
+                <span id="feedforward_speed" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-fan"></i></div>
+              <div class="metric-info">
+                <span class="label">Circulation Speed:</span>
+                <span id="fan_speed_circulation" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-fan"></i></div>
+              <div class="metric-info">
+                <span class="label">Fan Min:</span>
+                <span id="fan_min" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-fan"></i></div>
+              <div class="metric-info">
+                <span class="label">Fan Max:</span>
+                <span id="fan_max" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-wave-square"></i></div>
+              <div class="metric-info">
+                <span class="label">Smooth Alpha:</span>
+                <span id="fan_smooth_alpha" class="value">--</span>
+              </div>
             </div>
           </div>
-          <div class="metric-card">
-            <div class="metric-icon"><i class="fas fa-thermometer-empty"></i></div>
-            <div class="metric-info">
-              <span class="label">Environment Temperature:</span>
-              <span id="env_temperature" class="value">--</span>
+        </div>
+
+        <div class="metrics-section">
+          <h3><i class="fas fa-sliders-h"></i> PID Diagnostics</h3>
+          <div class="grid-container">
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-project-diagram"></i></div>
+              <div class="metric-info">
+                <span class="label">PID Output:</span>
+                <span id="pid_output" class="value">--</span>
+              </div>
             </div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-icon"><i class="fas fa-fire"></i></div>
-            <div class="metric-info">
-              <span class="label">PTC Heater:</span>
-              <span id="ptc_state" class="value">--</span>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-equals"></i></div>
+              <div class="metric-info">
+                <span class="label">PID KP:</span>
+                <span id="pid_kp" class="value">--</span>
+              </div>
             </div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-icon"><i class="fas fa-fire"></i></div>
-            <div class="metric-info">
-              <span class="label">Bottom Heater:</span>
-              <span id="btm_ptc_state" class="value">--</span>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-equals"></i></div>
+              <div class="metric-info">
+                <span class="label">PID KI:</span>
+                <span id="pid_ki" class="value">--</span>
+              </div>
             </div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-icon"><i class="fas fa-stream"></i></div>
-            <div class="metric-info">
-              <span class="label">Control State:</span>
-              <span id="control_state" class="value">--</span>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-equals"></i></div>
+              <div class="metric-info">
+                <span class="label">PID KD:</span>
+                <span id="pid_kd" class="value">--</span>
+              </div>
             </div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-icon"><i class="fas fa-fan"></i></div>
-            <div class="metric-info">
-              <span class="label">Fan Output (%):</span>
-              <span id="fan_speed_percent" class="value">--</span>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-arrows-left-right-to-line"></i></div>
+              <div class="metric-info">
+                <span class="label">Integral Error:</span>
+                <span id="integral_error" class="value">--</span>
+              </div>
             </div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-icon"><i class="fas fa-fan"></i></div>
-            <div class="metric-info">
-              <span class="label">Fan Output (0-1):</span>
-              <span id="fan_speed" class="value">--</span>
-            </div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-icon"><i class="fas fa-forward"></i></div>
-            <div class="metric-info">
-              <span class="label">Feedforward Speed:</span>
-              <span id="feedforward_speed" class="value">--</span>
-            </div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-icon"><i class="fas fa-project-diagram"></i></div>
-            <div class="metric-info">
-              <span class="label">PID Output:</span>
-              <span id="pid_output" class="value">--</span>
-            </div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-icon"><i class="fas fa-equals"></i></div>
-            <div class="metric-info">
-              <span class="label">PID KP:</span>
-              <span id="pid_kp" class="value">--</span>
-            </div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-icon"><i class="fas fa-equals"></i></div>
-            <div class="metric-info">
-              <span class="label">PID KI:</span>
-              <span id="pid_ki" class="value">--</span>
-            </div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-icon"><i class="fas fa-equals"></i></div>
-            <div class="metric-info">
-              <span class="label">PID KD:</span>
-              <span id="pid_kd" class="value">--</span>
-            </div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-icon"><i class="fas fa-arrows-left-right-to-line"></i></div>
-            <div class="metric-info">
-              <span class="label">Integral Error:</span>
-              <span id="integral_error" class="value">--</span>
-            </div>
-          </div>
-          <div class="metric-card">
-            <div class="metric-icon"><i class="fas fa-history"></i></div>
-            <div class="metric-info">
-              <span class="label">Previous Error:</span>
-              <span id="previous_error" class="value">--</span>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-history"></i></div>
+              <div class="metric-info">
+                <span class="label">Previous Error:</span>
+                <span id="previous_error" class="value">--</span>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <div class="widget draggable" data-widget="controls">
+          <div class="widget draggable" data-widget="controls">
       <div class="widget-header">
         <h2><i class="fas fa-cogs"></i> Control Panel</h2>
         <div class="widget-controls">
           <button class="minimize-btn"><i class="fas fa-minus"></i></button>
         </div>
       </div>
-      <div class="widget-content">
+      <div class="widget-content scrollable">
         <div class="controls-section">
           <h3><i class="fas fa-thermometer-three-quarters"></i> Target Temperature Control</h3>
           <div class="control-group">
@@ -223,11 +289,88 @@
             </table>
           </div>
         </div>
+
+        <div class="controls-section">
+          <h3><i class="fas fa-fan"></i> Fan Control Parameters</h3>
+          <div class="control-group">
+            <label for="warming_threshold_input">Warming Threshold (°C):</label>
+            <input type="number" id="warming_threshold_input" step="0.1" class="control-input">
+          </div>
+          <div class="control-group">
+            <label for="hysteresis_band_input">Hysteresis Band (°C):</label>
+            <input type="number" id="hysteresis_band_input" step="0.1" class="control-input">
+          </div>
+          <div class="control-group">
+            <label for="fan_speed_circulation_input">Circulation Speed (0-1):</label>
+            <input type="number" id="fan_speed_circulation_input" step="0.01" min="0" max="1" class="control-input">
+          </div>
+          <div class="dual-input-row">
+            <div class="control-group">
+              <label for="fan_min_input">Fan Min (0-1):</label>
+              <input type="number" id="fan_min_input" step="0.01" min="0" max="1" class="control-input">
+            </div>
+            <div class="control-group">
+              <label for="fan_max_input">Fan Max (0-1):</label>
+              <input type="number" id="fan_max_input" step="0.01" min="0" max="1" class="control-input">
+            </div>
+          </div>
+          <div class="control-group">
+            <label for="fan_smooth_alpha_input">Smooth Alpha (0-1):</label>
+            <input type="number" id="fan_smooth_alpha_input" step="0.01" min="0" max="1" class="control-input">
+          </div>
+          <button id="set_fan_btn" class="control-button"><i class="fas fa-check"></i> Set Fan Params</button>
+        </div>
       </div>
     </div>
+        </div>
 
+        <footer class="info-footer">
+          <div class="info-footer-content">
+            <span class="info-footer-title">System Message:</span>
+            <span class="info-footer-text" id="footer_message">Ready. Awaiting commands.</span>
+          </div>
+        </footer>
+      </div>
+    </section>
+
+    <section class="page-section chart-section" id="history-section">
+      <div class="page-inner chart-inner">
+        <div class="chart-header">
+          <div>
+            <h2><i class="fas fa-chart-area"></i> Temperature History</h2>
+            <p class="chart-subtitle">1-minute candlestick view of current_temperature</p>
+          </div>
+        </div>
+        <div class="chart-wrapper">
+          <div id="candlestick-chart"></div>
+          <div class="chart-summary" id="candlestick-summary">
+            <div class="summary-item">
+              <span class="summary-label">Latest Period</span>
+              <span class="summary-value" id="candle_period">--</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Open</span>
+              <span class="summary-value" id="candle_open">--</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">High</span>
+              <span class="summary-value" id="candle_high">--</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Low</span>
+              <span class="summary-value" id="candle_low">--</span>
+            </div>
+            <div class="summary-item">
+              <span class="summary-label">Close</span>
+              <span class="summary-value" id="candle_close">--</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
   </div>
 
+  <script src="https://unpkg.com/lightweight-charts@4.2.1/dist/lightweight-charts.standalone.production.js"></script>
   <script src="script.js"></script>
 </body>
 </html>
