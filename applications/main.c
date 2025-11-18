@@ -26,13 +26,13 @@ rt_thread_t screen_thread = RT_NULL;
 float env_temperature = 25.0f;        // 环境温度
 float current_humidity = 50.0f;       // 当前湿度值
 float current_temperature = 25.0f;    // 当前温度值
-float target_temperature = 25.0f;     // 目标温度值
+float target_temperature = 40.0f;     // 目标温度值
 
 /* 温控与风扇参数，可通过 fan_tune 动态调整 */
-float warming_threshold = 3.3f;             // 当前慢加热阈值 (由前馈表决定)
+float warming_threshold = 3.0f;             // 当前慢加热阈值 (由前馈表决定)
 float hysteresis_band = 0.7f;               // 迟滞范围 (+-0.7°C)
 float fan_speed_circulation = 0.00f;        // 加热时用于空气循环的低风速
-float fan_min = 0.00f;                      // 最小风速（非零时）
+float fan_min = 0.00f;                      // 最小风速
 float fan_max = 0.63f;                      // 最大风速
 float fan_smooth_alpha = 0.3f;              // 风扇命令平滑系数
 
