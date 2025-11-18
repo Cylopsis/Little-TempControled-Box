@@ -18,7 +18,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const kdInput = document.getElementById('kd_input');
     const setTargetBtn = document.getElementById('set_target_btn');
     const setPidBtn = document.getElementById('set_pid_btn');
-    const warmingThresholdInput = document.getElementById('warming_threshold_input');
     const hysteresisBandInput = document.getElementById('hysteresis_band_input');
     const fanSpeedCirculationInput = document.getElementById('fan_speed_circulation_input');
     const fanMinInput = document.getElementById('fan_min_input');
@@ -26,6 +25,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const fanSmoothAlphaInput = document.getElementById('fan_smooth_alpha_input');
     const setFanBtn = document.getElementById('set_fan_btn');
     const ffTableBody = document.getElementById('ff_table_body');
+    const warmingTableBody = document.getElementById('warming_table_body');
+        const lowerBoundMarker = document.getElementById('lower-bound-marker');
+        const upperBoundMarker = document.getElementById('upper-bound-marker');
+        const warmingLowerMarker = document.getElementById('warming-lower-marker');
+        const warmingUpperMarker = document.getElementById('warming-upper-marker');
+        const warmingBandEl = document.getElementById('warming-band');
     const chartContainer = document.getElementById('candlestick-chart');
     const candlePeriodEl = document.getElementById('candle_period');
     const candleOpenEl = document.getElementById('candle_open');
@@ -83,8 +88,59 @@ document.addEventListener('DOMContentLoaded', () => {
         { temperature: 60.0, baseSpeed: 0.50 }
     ];
 
+    const warmingTableInitial = [
+        { target: 25.0, threshold: 3.0 },
+        { target: 30.0, threshold: 2.5 },
+        { target: 40.0, threshold: 2.0 },
+        { target: 55.0, threshold: 1.5 },
+        { target: 70.0, threshold: 1.0 }
+    ];
+
     // --- Utility Functions ---
     const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
+        const valueToPercent = (value) => {
+            const span = Math.max(maxTempRange - minTempRange, 1);
+            return clamp((value - minTempRange) / span, 0, 1) * 100;
+        };
+
+        const markerPercent = (value) => clamp(valueToPercent(value), 2, 98);
+
+        function setElementDisplay(el, show) {
+            if (!el) return;
+            el.style.display = show ? 'block' : 'none';
+        }
+
+        function updateBoundMarker(el, value, labelText) {
+            if (!el || !Number.isFinite(value)) {
+                setElementDisplay(el, false);
+                return;
+            }
+            const percent = markerPercent(value);
+            el.style.bottom = `${percent}%`;
+            const label = el.querySelector('.marker-label');
+            if (label) label.textContent = labelText;
+            setElementDisplay(el, true);
+        }
+
+        function updateWarmingBand(lowerValue, upperValue) {
+            if (!warmingBandEl || !Number.isFinite(lowerValue) || !Number.isFinite(upperValue)) {
+                setElementDisplay(warmingBandEl, false);
+                return;
+            }
+            const lowerPercent = markerPercent(lowerValue);
+            const upperPercent = markerPercent(upperValue);
+            const bottom = Math.min(lowerPercent, upperPercent);
+            const height = Math.max(Math.abs(upperPercent - lowerPercent), 1.5);
+            warmingBandEl.style.bottom = `${bottom}%`;
+            warmingBandEl.style.height = `${height}%`;
+            setElementDisplay(warmingBandEl, true);
+        }
+
+        function hideBoundVisuals() {
+            [lowerBoundMarker, upperBoundMarker, warmingLowerMarker, warmingUpperMarker].forEach((el) => setElementDisplay(el, false));
+            setElementDisplay(warmingBandEl, false);
+        }
 
     // Text update helper (no visual highlight)
     function setText(el, newText) {
@@ -332,14 +388,35 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateThermometer(data) {
         const current = Number(data.current_temperature);
         const target = Number(data.target_temperature);
+        const warmingThreshold = Number(data.warming_threshold);
+        const hysteresis = Number(data.hysteresis_band);
+        const hasBounds = Number.isFinite(target) && Number.isFinite(warmingThreshold) && Number.isFinite(hysteresis);
 
-        ensureRange([current, target]);
+        const rangeValues = [];
+        if (Number.isFinite(current)) rangeValues.push(current);
+        if (Number.isFinite(target)) rangeValues.push(target);
 
-        const range = Math.max(maxTempRange - minTempRange, 1);
+        let lowerBound;
+        let upperBound;
+        let warmingLower;
+        let warmingUpper;
+
+        if (hasBounds) {
+            lowerBound = target - hysteresis - warmingThreshold;
+            warmingLower = target - hysteresis / 2.0;
+            warmingUpper = target + hysteresis / 2.0;
+            upperBound = target + hysteresis;
+            [lowerBound, warmingLower, warmingUpper, upperBound].forEach((value) => {
+                if (Number.isFinite(value)) {
+                    rangeValues.push(value);
+                }
+            });
+        }
+
+        ensureRange(rangeValues);
 
         if (Number.isFinite(current)) {
-            const ratio = clamp((current - minTempRange) / range, 0, 1);
-            const percent = ratio * 100;
+            const percent = valueToPercent(current);
             thermometerFill.style.height = `${percent}%`;
             const labelPercent = clamp(percent, 6, 96);
             temperatureLabel.style.bottom = `${labelPercent}%`;
@@ -347,13 +424,21 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         if (Number.isFinite(target)) {
-            const ratio = clamp((target - minTempRange) / range, 0, 1);
-            const percent = ratio * 100;
-            const clampedPercent = clamp(percent, 0, 100);
-            targetMarker.style.bottom = `${clampedPercent}%`;
-            const labelPercent = clamp(clampedPercent, 6, 96);
+            const percent = markerPercent(target);
+            targetMarker.style.bottom = `${percent}%`;
+            const labelPercent = clamp(percent, 6, 96);
             targetLabel.style.bottom = `${labelPercent}%`;
             targetLabel.textContent = `Target ${target.toFixed(1)} °C`;
+        }
+
+        if (hasBounds) {
+            updateBoundMarker(lowerBoundMarker, lowerBound, `Lower ${lowerBound.toFixed(1)}°C`);
+            updateBoundMarker(upperBoundMarker, upperBound, `Upper ${upperBound.toFixed(1)}°C`);
+            updateBoundMarker(warmingLowerMarker, warmingLower, `Warm ↓ ${warmingLower.toFixed(1)}°C`);
+            updateBoundMarker(warmingUpperMarker, warmingUpper, `Warm ↑ ${warmingUpper.toFixed(1)}°C`);
+            updateWarmingBand(warmingLower, warmingUpper);
+        } else {
+            hideBoundVisuals();
         }
     }
 
@@ -369,9 +454,6 @@ document.addEventListener('DOMContentLoaded', () => {
         }
         if (Number.isFinite(data.pid_kd)) {
             kdInput.value = data.pid_kd.toFixed(6);
-        }
-        if (warmingThresholdInput && Number.isFinite(data.warming_threshold)) {
-            warmingThresholdInput.value = data.warming_threshold.toFixed(3);
         }
         if (hysteresisBandInput && Number.isFinite(data.hysteresis_band)) {
             hysteresisBandInput.value = data.hysteresis_band.toFixed(3);
@@ -440,6 +522,37 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    function renderWarmingTable() {
+        if (!warmingTableBody) return;
+        warmingTableBody.innerHTML = '';
+        warmingTableInitial.forEach((entry, index) => {
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${index}</td>
+                <td><input type="number" class="control-input" value="${entry.target.toFixed(1)}" id="warm-target-${index}" step="0.1"></td>
+                <td><input type="number" class="control-input" value="${entry.threshold.toFixed(3)}" id="warm-threshold-${index}" step="0.1"></td>
+                <td><button class="control-button warm-update-btn" data-index="${index}">Update</button></td>
+            `;
+            warmingTableBody.appendChild(row);
+        });
+
+        document.querySelectorAll('.warm-update-btn').forEach((button) => {
+            button.addEventListener('click', (event) => {
+                const index = event.currentTarget.dataset.index;
+                const targetInput = document.getElementById(`warm-target-${index}`);
+                const thresholdInput = document.getElementById(`warm-threshold-${index}`);
+                if (!targetInput || !thresholdInput) return;
+                const targetValue = targetInput.value;
+                const thresholdValue = thresholdInput.value;
+                if (targetValue !== '' && thresholdValue !== '') {
+                    const command = `fan_tune -warm_set ${index} ${targetValue} ${thresholdValue}`;
+                    console.log(`Sending command: ${command}`);
+                    websocket.send(command);
+                }
+            });
+        });
+    }
+
     // --- WebSocket Handlers ---
     websocket.onopen = () => {
         console.log('Connected to WebSocket server');
@@ -448,6 +561,7 @@ document.addEventListener('DOMContentLoaded', () => {
             connectionStatus.className = 'connection-status connected';
         }
         renderFeedforwardTable();
+        renderWarmingTable();
         if (footerMessageEl) {
             footerMessageEl.textContent = 'Connected to data stream';
         }
@@ -536,14 +650,12 @@ document.addEventListener('DOMContentLoaded', () => {
     if (setFanBtn) {
         setFanBtn.addEventListener('click', () => {
             const parts = [];
-            const warm = warmingThresholdInput ? warmingThresholdInput.value : '';
             const hys = hysteresisBandInput ? hysteresisBandInput.value : '';
             const circ = fanSpeedCirculationInput ? fanSpeedCirculationInput.value : '';
             const fmin = fanMinInput ? fanMinInput.value : '';
             const fmax = fanMaxInput ? fanMaxInput.value : '';
             const alpha = fanSmoothAlphaInput ? fanSmoothAlphaInput.value : '';
 
-            if (warm !== '') parts.push(`-warm ${warm}`);
             if (hys !== '') parts.push(`-hys ${hys}`);
             if (circ !== '') parts.push(`-circ ${circ}`);
             if (fmin !== '') parts.push(`-min ${fmin}`);
@@ -577,7 +689,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    [warmingThresholdInput, hysteresisBandInput, fanSpeedCirculationInput, fanMinInput, fanMaxInput, fanSmoothAlphaInput].forEach((el) => {
+    [hysteresisBandInput, fanSpeedCirculationInput, fanMinInput, fanMaxInput, fanSmoothAlphaInput].forEach((el) => {
         if (el && setFanBtn) {
             el.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') setFanBtn.click();

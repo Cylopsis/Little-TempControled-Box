@@ -14,11 +14,10 @@ void screen_on()
     u8g2_InitDisplay(&u8g2);
     u8g2_SetPowerSave(&u8g2, 0);
 
-    /* full buffer example, setup procedure ends in _f */
-    u8g2_ClearBuffer(&u8g2);
     u8g2_SetFont(&u8g2, u8g2_font_ncenB08_tr);
     while (1)
     {
+        u8g2_ClearBuffer(&u8g2);
         switch (control_state)
         {
             case CONTROL_STATE_HEATING:

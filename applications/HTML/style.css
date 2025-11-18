@@ -54,10 +54,12 @@ body {
 
 .page-inner {
     width: 100%;
-    padding: 20px;
+    padding: 0px;
     display: flex;
     flex-direction: column;
     gap: 20px;
+    flex: 1;
+    min-height: 0;
 }
 
 .chart-section .page-inner {
@@ -65,8 +67,8 @@ body {
 }
 
 .chart-inner {
-    padding: clamp(20px, 6vw, 48px);
-    gap: clamp(24px, 5vw, 40px);
+    padding: clamp(10px, 3vw, 24px);
+    gap: clamp(12px, 3vw, 20px);
 }
 
 /* Header */
@@ -78,7 +80,6 @@ body {
     background: linear-gradient(135deg, var(--primary-color), var(--secondary-color));
     color: white;
     border-radius: 0px 0px 12px 12px;
-    margin-bottom: 15px;
     box-shadow: var(--shadow-medium);
 }
 
@@ -130,7 +131,8 @@ body {
     grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
     gap: 20px;
     padding: 20px;
-    min-height: calc(100vh - 200px);
+    flex: 1 1 auto;
+    min-height: 0;
 }
 
 .overview-section .layout-container {
@@ -283,11 +285,11 @@ body {
 }
 
 .info-footer {
-    margin-top: 20px;
+    margin-top: auto;
     background: #111;
     color: #f6f6f6;
-    padding: 16px 24px;
-    border-radius: 12px;
+    padding: 8px 24px;
+    border-radius: 0px;
     box-shadow: var(--shadow-medium);
 }
 
@@ -300,7 +302,8 @@ body {
 }
 
 .info-footer-title {
-    font-weight: 600;
+    font-weight: 378;
+    font-size: 0.76rem;
     letter-spacing: 0.05em;
     text-transform: uppercase;
     color: #fff;
@@ -308,7 +311,7 @@ body {
 
 .info-footer-text {
     font-family: 'Courier New', Courier, monospace;
-    font-size: 0.95rem;
+    font-size: 0.76rem;
     color: #d8d8d8;
 }
 
@@ -380,6 +383,87 @@ body {
     border-radius: 20px 20px 999px 999px;
 }
 
+.thermo-zone-band {
+    position: absolute;
+    left: 10%;
+    width: 80%;
+    border-radius: 18px;
+    background: linear-gradient(180deg, rgba(34, 197, 94, 0.15) 0%, rgba(34, 211, 238, 0.35) 100%);
+    box-shadow: inset 0 0 12px rgba(14, 165, 233, 0.4);
+    opacity: 0.9;
+    pointer-events: none;
+    display: none;
+    z-index: 2;
+}
+
+.thermo-bound-line {
+    position: absolute;
+    left: 8%;
+    width: 84%;
+    height: 2px;
+    background: rgba(15, 23, 42, 0.25);
+    border-radius: 2px;
+    display: none;
+    pointer-events: auto;
+    cursor: pointer;
+    z-index: 3;
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: #0f172a;
+    transition: box-shadow 0.15s ease;
+}
+
+.thermo-bound-line .marker-label {
+    position: absolute;
+    right: 6px;
+    transform: translateY(-50%) translateX(6px);
+    background: rgba(15, 23, 42, 0.72);
+    color: #f8fafc;
+    padding: 2px 6px;
+    border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(15, 23, 42, 0.2);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.thermo-bound-line:hover .marker-label,
+.thermo-bound-line:focus-visible .marker-label {
+    opacity: 1;
+    visibility: visible;
+    transform: translateY(-50%) translateX(0);
+}
+
+.thermo-bound-line:focus-visible {
+    box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.3);
+    outline: none;
+}
+
+.thermo-bound-line.bound-low {
+    background: rgba(249, 115, 22, 0.85);
+}
+
+.thermo-bound-line.bound-low .marker-label {
+    background: rgba(249, 115, 22, 0.92);
+}
+
+.thermo-bound-line.bound-high {
+    background: rgba(59, 130, 246, 0.85);
+}
+
+.thermo-bound-line.bound-high .marker-label {
+    background: rgba(59, 130, 246, 0.95);
+}
+
+.thermo-bound-line.bound-warm {
+    background: rgba(34, 211, 238, 0.9);
+}
+
+.thermo-bound-line.bound-warm .marker-label {
+    background: rgba(34, 211, 238, 0.95);
+}
+
 .thermometer-target {
     position: absolute;
     left: 12%;
@@ -390,6 +474,7 @@ body {
     border-radius: 2px;
     transition: bottom 0.3s ease;
     z-index: 2;
+    cursor: pointer;
 }
 
 /* .thermometer-target::after {
@@ -428,6 +513,15 @@ body {
     transform: translateY(50%);
     background: rgba(42, 157, 143, 0.92);
     box-shadow: 0 10px 22px rgba(42, 157, 143, 0.25);
+    opacity: 0;
+    visibility: hidden;
+}
+
+#target-marker:hover ~ #target-label,
+#target-marker:focus-visible ~ #target-label,
+.thermometer-label.target.is-visible {
+    opacity: 1;
+    visibility: visible;
 }
 
 .thermometer-scale {
@@ -501,6 +595,18 @@ body {
 
 .marker.target {
     background: var(--secondary-color);
+}
+
+.marker.lower {
+    background: #f97316;
+}
+
+.marker.warm {
+    background: #22d3ee;
+}
+
+.marker.upper {
+    background: #3b82f6;
 }
 
 @media (max-width: 768px) {
@@ -633,6 +739,13 @@ body {
     gap: 8px;
 }
 
+.section-hint {
+    margin-top: -12px;
+    margin-bottom: 12px;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
 .control-group {
     display: flex;
     align-items: center;
@@ -701,19 +814,24 @@ body {
     border: 1px solid var(--border-color);
 }
 
-#ff_table {
+#ff_table,
+#warming_table {
     width: 100%;
     border-collapse: collapse;
     font-size: 14px;
 }
 
-#ff_table th, #ff_table td {
+#ff_table th,
+#ff_table td,
+#warming_table th,
+#warming_table td {
     padding: 12px;
     text-align: left;
     border-bottom: 1px solid var(--border-color);
 }
 
-#ff_table th {
+#ff_table th,
+#warming_table th {
     background: linear-gradient(135deg, #f8f9fa, #e9ecef);
     font-weight: 600;
     color: var(--text-primary);
@@ -721,11 +839,13 @@ body {
     top: 0;
 }
 
-#ff_table tbody tr:hover {
+#ff_table tbody tr:hover,
+#warming_table tbody tr:hover {
     background: rgba(78, 205, 196, 0.05);
 }
 
-#ff_table input {
+#ff_table input,
+#warming_table input {
     width: 100%;
     padding: 6px 8px;
     border: 1px solid var(--border-color);
@@ -733,7 +853,8 @@ body {
     font-size: 12px;
 }
 
-#ff_table button {
+#ff_table button,
+#warming_table button {
     padding: 4px 8px;
     font-size: 11px;
     border: none;
@@ -744,7 +865,8 @@ body {
     transition: background 0.2s ease;
 }
 
-#ff_table button:hover {
+#ff_table button:hover,
+#warming_table button:hover {
     background: var(--primary-color);
 }
 
@@ -939,4 +1061,19 @@ body {
         max-height: none;
         overflow: visible;
     }
+}
+
+body,
+.page-container,
+.widget-content.scrollable,
+.table-container {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+}
+
+body::-webkit-scrollbar,
+.page-container::-webkit-scrollbar,
+.widget-content.scrollable::-webkit-scrollbar,
+.table-container::-webkit-scrollbar {
+    display: none;
 }

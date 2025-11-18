@@ -221,7 +221,7 @@ void remote_start(int argc, char **argv)
     server_thread = rt_thread_create("RemoteTCPSrv",
                                      remote_server_thread_entry,
                                      RT_NULL,
-                                     2560,
+                                     3172,
                                      12,
                                      20);
 

@@ -29,7 +29,20 @@
         <div class="thermometer-container">
           <div class="thermometer">
             <div class="thermometer-column">
-              <div id="target-marker" class="thermometer-target"></div>
+              <div id="target-marker" class="thermometer-target" tabindex="0" aria-label="Target temperature marker"></div>
+              <div id="warming-band" class="thermo-zone-band"></div>
+              <div id="lower-bound-marker" class="thermo-bound-line bound-low" tabindex="0" aria-label="Lower bound line">
+                <span class="marker-label">Lower Bound</span>
+              </div>
+              <div id="warming-lower-marker" class="thermo-bound-line bound-warm" tabindex="0" aria-label="Warming lower line">
+                <span class="marker-label">Warm ↓</span>
+              </div>
+              <div id="warming-upper-marker" class="thermo-bound-line bound-warm" tabindex="0" aria-label="Warming upper line">
+                <span class="marker-label">Warm ↑</span>
+              </div>
+              <div id="upper-bound-marker" class="thermo-bound-line bound-high" tabindex="0" aria-label="Upper bound line">
+                <span class="marker-label">Upper Bound</span>
+              </div>
               <div id="temperature-fill" class="thermometer-fill">
                 <div id="temperature-label" class="thermometer-label current">--°C</div>
               </div>
@@ -45,6 +58,9 @@
           <div class="thermometer-legend">
             <span class="legend-item"><span class="marker current"></span>Current</span>
             <span class="legend-item"><span class="marker target"></span>Target</span>
+            <span class="legend-item"><span class="marker lower"></span>Lower Bound</span>
+            <span class="legend-item"><span class="marker warm"></span>Warming Zone</span>
+            <span class="legend-item"><span class="marker upper"></span>Upper Bound</span>
           </div>
         </div>
       </div>
@@ -291,11 +307,24 @@
         </div>
 
         <div class="controls-section">
-          <h3><i class="fas fa-fan"></i> Fan Control Parameters</h3>
-          <div class="control-group">
-            <label for="warming_threshold_input">Warming Threshold (°C):</label>
-            <input type="number" id="warming_threshold_input" step="0.1" class="control-input">
+          <h3><i class="fas fa-temperature-half"></i> Warming Threshold Table</h3>
+          <div class="table-container">
+            <table id="warming_table">
+              <thead>
+                <tr>
+                  <th>Index</th>
+                  <th>Target (°C)</th>
+                  <th>Threshold (°C)</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="warming_table_body"></tbody>
+            </table>
           </div>
+        </div>
+
+        <div class="controls-section">
+          <h3><i class="fas fa-fan"></i> Fan Control Parameters</h3>
           <div class="control-group">
             <label for="hysteresis_band_input">Hysteresis Band (°C):</label>
             <input type="number" id="hysteresis_band_input" step="0.1" class="control-input">
