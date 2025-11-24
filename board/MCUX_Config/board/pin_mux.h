@@ -24,12 +24,13 @@ extern "C" {
  *
  */
 void BOARD_InitBootPins(void);
-
+#define PCR_IBE_ibe0 0x00u /*!<@brief Input Buffer Enable: Disables */
 #define PCR_IBE_ibe1 0x01u           /*!<@brief Input Buffer Enable: Enables */
 #define PCR_INV_inv0 0x00u           /*!<@brief Invert Input: Does not invert */
 #define PCR_PE_pe0 0x00u           /*!<@brief Pull Enable: Disables */
 #define PCR_PE_pe1 0x01u             /*!<@brief Pull Enable: Enables */
 #define PCR_PS_ps1 0x01u             /*!<@brief Pull Select: Enables internal pullup resistor */
+#define PORT2_PCR0_MUX_mux00 0x00u /*!<@brief Pin Multiplex Control: Alternative 0 (GPIO) */
 #define PORT3_PCR16_MUX_mux111 0x07u /*!<@brief Pin Multiplex Control: Alternative 7 (chip-specific) */
 
 /*!

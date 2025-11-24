@@ -7,7 +7,7 @@ menu "Application Configuration"
         
         config PKG_USING_YS4028B12H_PWM_DEV_NAME
             string "YS4028B12H PWM Device Name"
-            default "pwm1"
+            default "pwm0"
             depends on PKG_USING_YS4028B12H
             help
                 Set the PWM device name for the YS4028B12H fan.
@@ -33,5 +33,22 @@ menu "Application Configuration"
             help
                 Set the default pulse width for the YS4028B12H fan in microseconds. 
     
+    endmenu
+    menu "MOS-PTC Configuration"
+        config PKG_USING_PTC_PWM_DEV_NAME
+            string "MOS-PTC PWM Device Name"
+            default "pwm0"
+            help
+                Set the PWM device name for the MOS-PTC heater.
+        config PKG_USING_PTC_PWM_CHANNEL
+            int "MOS-PTC PWM Channel"
+            default 1
+            help
+                Set the PWM channel for the MOS-PTC heater.
+        config PKG_USING_PTC_FREQUENCY
+            int "MOS-PTC PWM Frequency  (Hz)"
+            default 100
+            help
+                Set the PWM frequency for the MOS-PTC heater in Hertz.
     endmenu
 endmenu

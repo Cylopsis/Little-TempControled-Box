@@ -15,7 +15,7 @@
 #include "fsl_spc.h"
 
 #ifdef RT_USING_ADC
-
+#define BSP_USING_ADC0
 #define DEFAULT_HW_AVG          (kLPADC_HardwareAverageCount4)
 #define DEFAULT_SAMPLE_TIME     (kLPADC_SampleTimeADCK7)
 

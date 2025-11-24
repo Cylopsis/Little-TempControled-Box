@@ -174,6 +174,7 @@
 #define RT_SOFT_I2C1_BUS_NAME "i2c1"
 #define RT_SOFT_I2C1_TIMING_DELAY 10
 #define RT_SOFT_I2C1_TIMING_TIMEOUT 10
+#define RT_USING_ADC
 #define RT_USING_PWM
 #define RT_USING_SPI
 #define RT_USING_SENSOR
@@ -395,12 +396,10 @@
 /* u8g2: a monochrome graphic library */
 
 #define PKG_USING_U8G2_OFFICIAL
-#define U8G2_USE_HW_I2C
-#define U8G2_I2C_DEVICE_NAME "i2c2"
 
 /* U8G2 Examples */
 
-#define U8G2_USING_HW_I2C_SSD1306
+#define U8G2_USING_SW_I2C_SSD1306
 /* end of U8G2 Examples */
 #define PKG_USING_U8G2_OFFICIAL_LATEST_VERSION
 #define PKG_U8G2_OFFICIAL_VER_NUM 0x99999
@@ -585,12 +584,13 @@
 #define BSP_USING_UART0
 #define BSP_USING_I2C
 #define BSP_USING_I2C0
-#define BSP_USING_I2C2
-#define BSP_USING_I2C3
 #define BSP_USING_SPI
 #define BSP_USING_SPI1
+#define BSP_USING_ADC
+#define BSP_USING_ADC0_CH0
 #define BSP_USING_PWM
 #define BSP_USING_PWM0
+#define BSP_USING_PWM1
 /* end of On-chip Peripheral Drivers */
 
 /* Board extended module Drivers */
@@ -614,6 +614,13 @@
 #define PKG_USING_YS4028B12H_PERIOD 40000
 #define PKG_USING_YS4028B12H_DEFAULT_PAULSE 10000
 /* end of Fan Configuration */
+
+/* MOS-PTC Configuration */
+
+#define PKG_USING_PTC_PWM_DEV_NAME "pwm0"
+#define PKG_USING_PTC_PWM_CHANNEL 0
+#define PKG_USING_PTC_FREQUENCY 2000
+/* end of MOS-PTC Configuration */
 /* end of Application Configuration */
 
 #endif

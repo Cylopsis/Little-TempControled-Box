@@ -84,12 +84,14 @@ void BOARD_InitPins(void)
     RESET_ReleasePeripheralReset(kGPIO2_RST_SHIFT_RSTn);
     RESET_ReleasePeripheralReset(kGPIO3_RST_SHIFT_RSTn);
 
+    /* ADC0 peripheral is released from reset */
+    RESET_ReleasePeripheralReset(kADC0_RST_SHIFT_RSTn);
     /* Release LPUART0 resets */
     RESET_ReleasePeripheralReset(kLPUART0_RST_SHIFT_RSTn);
-    /* LPI2C2 peripheral is released from reset */
-    RESET_ReleasePeripheralReset(kLPI2C2_RST_SHIFT_RSTn);
     /* FLEXPWM0 peripheral is released from reset */
     RESET_ReleasePeripheralReset(kFLEXPWM0_RST_SHIFT_RSTn);
+    /* FLEXPWM1 peripheral is released from reset */
+    RESET_ReleasePeripheralReset(kFLEXPWM1_RST_SHIFT_RSTn);
 
     const port_pin_config_t port0_2_pin78_config = {/* Internal pull-up resistor is enabled */
                                                     kPORT_PullUp,
@@ -217,38 +219,6 @@ void BOARD_InitPins(void)
     /* PORT0_17 (pin 84) is configured as LPI2C0_SCL */
     PORT_SetPinConfig(PORT0, 17U, &port0_17_pin84_config);
 
-    /* PORT1_8 (pin 1) is configured as LPI2C2_SDA */
-    PORT_SetPinMux(PORT1, 8U, kPORT_MuxAlt3);
-
-    PORT1->PCR[8] = ((PORT1->PCR[8] &
-                      /* Mask bits to zero which are setting */
-                      (~(PORT_PCR_PS_MASK | PORT_PCR_PE_MASK | PORT_PCR_IBE_MASK)))
-
-                     /* Pull Select: Enables internal pullup resistor. */
-                     | PORT_PCR_PS(PCR_PS_ps1)
-
-                     /* Pull Enable: Enables. */
-                     | PORT_PCR_PE(PCR_PE_pe1)
-
-                     /* Input Buffer Enable: Enables. */
-                     | PORT_PCR_IBE(PCR_IBE_ibe1));
-
-    /* PORT1_9 (pin 2) is configured as LPI2C2_SCL */
-    PORT_SetPinMux(PORT1, 9U, kPORT_MuxAlt3);
-
-    PORT1->PCR[9] = ((PORT1->PCR[9] &
-                      /* Mask bits to zero which are setting */
-                      (~(PORT_PCR_PS_MASK | PORT_PCR_PE_MASK | PORT_PCR_IBE_MASK)))
-
-                     /* Pull Select: Enables internal pullup resistor. */
-                     | PORT_PCR_PS(PCR_PS_ps1)
-
-                     /* Pull Enable: Enables. */
-                     | PORT_PCR_PE(PCR_PE_pe1)
-
-                     /* Input Buffer Enable: Enables. */
-                     | PORT_PCR_IBE(PCR_IBE_ibe1));
-
 #ifdef BSP_USING_SPI1
     const port_pin_config_t port2_12_pin34_config = {/* Internal pull-up/down resistor is disabled */
                                                      kPORT_PullDisable,
@@ -350,6 +320,15 @@ void BOARD_InitPins(void)
     /* PORT2_6 (pin 20) is configured as LPSPI1_PCS1 */
     PORT_SetPinConfig(PORT2, 6U, &port2_6_pin28_config);
 #endif
+    PORT2->PCR[0] = ((PORT2->PCR[0] &
+                      /* Mask bits to zero which are setting */
+                      (~(PORT_PCR_MUX_MASK | PORT_PCR_IBE_MASK)))
+
+                     /* Pin Multiplex Control: PORT2_0 (pin 22) is configured as ADC0_A0. */
+                     | PORT_PCR_MUX(PORT2_PCR0_MUX_mux00)
+
+                     /* Input Buffer Enable: Disables. */
+                     | PORT_PCR_IBE(PCR_IBE_ibe0));
     /* PORT3_6 (pin 71) is configured as PWM0_A0 */
     PORT_SetPinMux(PORT3, 6U, kPORT_MuxAlt5);
 
@@ -359,15 +338,24 @@ void BOARD_InitPins(void)
 
                      /* Input Buffer Enable: Enables. */
                      | PORT_PCR_IBE(PCR_IBE_ibe1));
-        /* PORT3_8 (pin 69) is configured as PWM0_A1 */
-    PORT_SetPinMux(PORT3, 8U, kPORT_MuxAlt5);
+    /* PORT3_7 (pin 70) is configured as PWM0_B0 */
+    PORT_SetPinMux(PORT3, 7U, kPORT_MuxAlt5);
 
-    PORT3->PCR[8] = ((PORT3->PCR[8] &
+    PORT3->PCR[7] = ((PORT3->PCR[7] &
                       /* Mask bits to zero which are setting */
                       (~(PORT_PCR_IBE_MASK)))
 
                      /* Input Buffer Enable: Enables. */
                      | PORT_PCR_IBE(PCR_IBE_ibe1));
+    PORT3->PCR[16] = ((PORT3->PCR[16] &
+                       /* Mask bits to zero which are setting */
+                       (~(PORT_PCR_MUX_MASK | PORT_PCR_IBE_MASK)))
+
+                      /* Pin Multiplex Control: PORT3_16 (pin 59) is configured as PWM1_A0. */
+                      | PORT_PCR_MUX(PORT3_PCR16_MUX_mux111)
+
+                      /* Input Buffer Enable: Enables. */
+                      | PORT_PCR_IBE(PCR_IBE_ibe1));
 #ifdef BSP_USING_I2C3
     /* LPI2C3 peripheral is released from reset */
     RESET_ReleasePeripheralReset(kLPI2C0_RST_SHIFT_RSTn);

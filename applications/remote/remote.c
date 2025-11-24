@@ -9,7 +9,7 @@
 
 #define SERVER_PORT     5000    // 服务器监听的端口
 #define RECV_BUFSZ      256     // 接收缓冲区大小
-#define SEND_BUFSZ      1024    // 发送缓冲区大小
+#define SEND_BUFSZ      630    // 发送缓冲区大小
 #define MAX_ARGS        16      // 命令行参数最大数量
 
 static rt_thread_t server_thread = RT_NULL;
@@ -21,9 +21,7 @@ static const char *control_state_to_string(control_state_t state)
     case CONTROL_STATE_HEATING: return "HEATING";
     case CONTROL_STATE_WARMING: return "WARMING";
     case CONTROL_STATE_COOLING: return "COOLING";
-    case CONTROL_STATE_IDLE:
-    default:
-        return "IDLE";
+    default:                    return "ERROR!!!";
     }
 }
 
@@ -93,12 +91,7 @@ static void remote_server_thread_entry(void *parameter)
 
             recv_buf[bytes_received] = '\0';
             char* p = strpbrk(recv_buf, "\r\n");
-            if (p) *p = '\0'; // 去掉换行符
-            // for (int i = 0; i < bytes_received; i++) {
-            //     if (recv_buf[i] == '\r' || recv_buf[i] == '\n') {
-            //         recv_buf[i] = '\0';
-            //     }
-            // }
+            if (p) *p = '\0'; 
             // rt_kprintf("[Remote] Received command: '%s'\n", recv_buf);
             argc = 0;
             char *saveptr; // for strtok_r
@@ -115,55 +108,43 @@ static void remote_server_thread_entry(void *parameter)
             // --- 根据第一个参数分发命令 ---
             if (strcmp(argv[0], "get_status") == 0)
             {
-                const float fan_percent = final_fan_speed * 100.0f;
-                const char *ptc_state_str = (ptc_state == PIN_HIGH) ? "ON" : "OFF";
-                const char *btm_ptc_str = (btm_ptc_state == PIN_HIGH) ? "ON" : "OFF";
+                const float fan_percent = final_pwm_duty * 100.0f;
+                const char *ptc_state_str = (ptc_state == HEAT) ? "ON" : "OFF";
                 const char *ctrl_state_str = control_state_to_string(control_state);
 
                 int len = snprintf(send_buf, sizeof(send_buf), "{"\
+                    "\"current_ptc_temperature\":%.2f,"\
                     "\"current_temperature\":%.2f,"\
                     "\"target_temperature\":%.2f,"\
                     "\"current_humidity\":%.2f,"\
                     "\"env_temperature\":%.2f,"\
                     "\"ptc_state\":\"%s\","\
-                    "\"btm_ptc_state\":\"%s\","\
                     "\"control_state\":\"%s\","\
-                    "\"fan_speed\":%.4f,"\
-                    "\"fan_speed_percent\":%.2f,"\
-                    "\"feedforward_speed\":%.4f,"\
-                    "\"pid_output\":%.4f,"\
-                    "\"pid_kp\":%.6f,"\
-                    "\"pid_ki\":%.6f,"\
-                    "\"pid_kd\":%.6f,"\
-                    "\"integral_error\":%.4f,"\
-                    "\"previous_error\":%.4f,"\
-                    "\"warming_threshold\":%.4f,"\
-                    "\"hysteresis_band\":%.4f,"\
-                    "\"fan_speed_circulation\":%.4f,"\
-                    "\"fan_min\":%.4f,"\
-                    "\"fan_max\":%.4f,"\
-                    "\"fan_smooth_alpha\":%.4f"\
+                    "\"current_pwm\":%.2f,"\
+                    "\"heat_kp\":%.2f,"\
+                    "\"heat_ki\":%.2f,"\
+                    "\"heat_kd\":%.2f,"\
+                    "\"cool_kp\":%.2f,"\
+                    "\"cool_ki\":%.2f,"\
+                    "\"warming_threshold\":%.2f,"\
+                    "\"hysteresis_band\":%.2f"\
                     "}\r\n",
+                    ptc_temperature,
                     current_temperature,
                     target_temperature,
                     current_humidity,
                     env_temperature,
                     ptc_state_str,
-                    btm_ptc_str,
                     ctrl_state_str,
-                    final_fan_speed,
-                    fan_percent,
-                    feedforward_speed_last,
-                    pid_output_last,
-                    KP, KI, KD,
-                    integral_error,
-                    previous_error,
+                    final_pwm_duty,
+                    pid_heat.kp,
+                    pid_heat.ki,
+                    pid_heat.kd,
+                    pid_cool.kp,
+                    pid_cool.ki,
                     warming_threshold,
-                    hysteresis_band,
-                    fan_speed_circulation,
-                    fan_min,
-                    fan_max,
-                    fan_smooth_alpha);
+                    hysteresis_band
+                );
 
                 if (len < 0 || len >= SEND_BUFSZ)
                 {
@@ -178,26 +159,20 @@ static void remote_server_thread_entry(void *parameter)
                     break;
                 }
             }
-            else if (strcmp(argv[0], "pid_tune") == 0)
+            else if (strcmp(argv[0], "tune") == 0)
             {         
-                pid_tune(argc, argv);
-
-                const char ok_msg[] = "OK\r\n";
-                send(connected, ok_msg, sizeof(ok_msg) - 1, 0);
-            }
-            else if (strcmp(argv[0], "fan_tune") == 0)
-            {
-                fan_tune(argc, argv);
+                tune(argc, argv);
 
                 const char ok_msg[] = "OK\r\n";
                 send(connected, ok_msg, sizeof(ok_msg) - 1, 0);
             }
             else
             {
-                // 对于未知命令，发送错误信息
                 sprintf(send_buf, "ERROR: Unknown command '%s'.\r\n", argv[0]);
                 send(connected, send_buf, strlen(send_buf), 0);
             }
+
+            rt_thread_mdelay(30);
         }
     }
 
@@ -222,8 +197,8 @@ void remote_start(int argc, char **argv)
                                      remote_server_thread_entry,
                                      RT_NULL,
                                      3172,
-                                     12,
-                                     20);
+                                     11,
+                                     30);
 
     if (server_thread != RT_NULL)
     {
