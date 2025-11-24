@@ -1,8 +1,10 @@
-# 基于 RT-Thread 的简单恒温泡沫箱
+# 基于 RT-Thread 的恒温泡沫箱
 
-本项目是一个基于 RT-Thread 和NXP FDRM-MCXA156的简单温控箱系统，集成了：
+本项目是一个基于 RT-Thread 和 NXP FDRM‑MCXA156 的桌面温控箱系统：
 
-- PTC 恒温加热 + 风扇冷却的闭环温度控制  
+- 通过 LR7843 MOSFET 对 PTC 进行 PWM 占空比控制
+- 使用 NTC + ADC 实时测量 PTC 自身温度，做前馈 + PID 闭环
+- 通过继电器切换 MOSFET PWM 信号到 PTC 或风扇，实现“加热 / 风冷”双模
 - RT-Thread MSH 调参命令与状态查询接口  
 - 通过 TCP 的远程控制协议  
 - Python WebSocket 代理  
@@ -13,26 +15,31 @@
 ## 功能概览
 
 - 恒温控制  
-  - 支持目标温度设定，自动在加热 / 保温 / 冷却三种状态间切换  
-  - 双路 PTC 加热元件：高温 / 低温 PTC，按目标温度智能选用  
-  - 风扇 PWM 调速，结合前馈 + PID 控制实现稳定温度控制
+  - 支持目标箱内温度设定，自动在加热 / 保温 / 冷却三种状态间切换  
+  - 加热侧：MOSFET（LR7843）+ PTC，PWM 控制 PTC 功率，并对 PTC 温度做闭环与过温保护  
+  - 冷却侧：PWM 控制风扇，实现箱体降温  
+  - 使用状态继电器 `STATE_PIN` 在“制热”（PWM 到 MOS‑PTC）和“降温”（PWM 到风扇）之间切换
 
 - 传感与显示  
-  - 使用板载 P3T1755 作为环境温度传感器  
-  - 使用 DHT11 获取箱内温度与湿度  
-  - OLED 屏幕实时显示当前控制状态、当前温度、目标温度、环境温度
+  - 使用板载 P3T1755 作为环境温度传感器 `env_temperature`  
+  - 使用 DHT11 获取箱内温度 `current_temperature` 与湿度 `current_humidity`  
+  - 使用 NTC + ADC 测量 PTC 表面温度 `ptc_temperature`，用于加热闭环与过温保护  
+  - OLED 屏幕实时显示控制状态、箱内温度、目标温度、环境温度等
+
+[OLED](assets/OLED.jpg)
 
 - 网络与远程控制  
-  - 板端启动 TCP 服务器，提供 JSON 状态查询和参数配置接口  
-  - Python [`websocket_proxy.py`](applications/remote/websocket_proxy.py:1) 作为 WebSocket 代理，与浏览器前端通讯  
-  - Web 前端仪表盘 [`index.html`](applications/HTML/index.html:1) 展示实时温度、控制状态、风扇/加热器状态、PID 诊断信息，并支持在线调参
+  - 板端启动 TCP 服务器，提供 JSON 状态查询和参数配置接口（命令 `get_status` / `tune`）  
+  - Python [`websocket_proxy.py`](applications/remote/websocket_proxy.py) 作为 WebSocket 代理，与浏览器前端通讯  
+  - Web 仪表盘 [`index.html`](applications/HTML/index.html) 展示实时温度 / PTC 状态 / 控制状态 / PID 参数等，并支持在线调参
+
+[dashboard](assets/dashboard.png)
 
 - 调参与诊断  
   - MSH 命令：  
-    - `get_status`：打印当前系统状态与控制参数  
-    - `pid_tune`：在线调整 PID 参数  
-    - `fan_tune`：在线调整风扇相关参数与预热阈值表  
-  - Web 前端提供 PID、风扇参数、预热阈值表的可视化编辑界面
+    - `get_status`：打印当前系统状态与 PID 内部状态  
+    - `tune`：统一调参入口（目标温度、迟滞、偏置、PID 与前馈表等）  
+  - TCP 协议直接透传 `tune` 命令，Web 前端可发文本命令进行调试
 
 ---
 
@@ -43,143 +50,248 @@
 ```mermaid
 flowchart LR
   subgraph Board_RTThread
-    A[传感器 P3T1755 DHT11] --> B[控制循环 main.c]
-    B --> C[PTC 加热继电器]
-    B --> D[风扇 YS4028B12H PWM]
-    B --> E[OLED 显示 screen.c]
-    B <--> F[MSH 命令 get_status pid_tune fan_tune]
-    B <--> G[TCP 服务器 remote.c]
+    A[传感器 P3T1755 DHT11 NTC+ADC] --> B[状态机 main.c]
+    B --> C[STATE_PIN 继电器切换 HEAT/COOL]
+    B --> D[PTC MOSFET PWM 通道]
+    B --> E[风扇 PWM 通道]
+    B --> F[OLED 显示 screen.c]
+    B <--> G[MSH 命令 get_status tune]
+    B <--> H[TCP 服务器 remote.c]
   end
 
   subgraph Host_PC
-    G <--> H[WebSocket 代理 websocket_proxy.py]
-    H <--> I[浏览器前端 HTML Dashboard]
+    H <--> I[WebSocket 代理 websocket_proxy.py]
+    I <--> J[浏览器前端 HTML Dashboard]
   end
 ```
 
-### 控制主循环
+---
 
-核心逻辑在 [`main.c`](applications/main.c:178) 中：
+## 核心控制逻辑
 
-- 周期：$SAMPLE\_PERIOD\_MS = 1000$ ms  
-- 传感：  
-  - `p3t1755_read_temp(&env_temperature)` 读环境温度  
-  - DHT11 `temp_dht` / `humi_dht` 读箱内温湿度  
-- 状态机：  
-  - `CONTROL_STATE_HEATING`  
-  - `CONTROL_STATE_WARMING`  
-  - `CONTROL_STATE_COOLING`  
-  - `CONTROL_STATE_IDLE`  
-- PTC 选择逻辑：  
-  - 当前温度与目标温度比较，结合 `warming_threshold` 和 `hysteresis_band` 决定：  
-    - 进入加热 / 预热 / 冷却  
-    - 选择高温 PTC 还是低温 PTC  
-- 风扇控制：  
-  - 以 `target_temperature` 与 `env_temperature` 计算出前馈风速 `get_feedforward_speed`  
-  - 冷却时启用 PID：  
-    - PID 输入：当前箱内温度与目标温度误差  
-    - PID 输出与前馈叠加，形成 `fan_speed_cmd`  
-    - 进行速度限幅以及简单抗积分饱和  
-  - 对最终速度 `final_fan_speed` 做一阶滤波，避免 PWM 抖动  
+### 1. 采样与状态机 [`applications/main.c`](applications/main.c)
+
+主线程中（约 $SAMPLE\_PERIOD\_MS = 1000$ ms）：
+
+- 采集传感器：
+  - `p3t1755_read_temp(&env_temperature)` 获取环境温度
+  - DHT11：
+    - `dht_temp_dev` 读箱内温度 `current_temperature`
+    - `dht_humi_dev` 读箱内湿度 `current_humidity`
+- 基于箱内温度构造三态状态机：
+
+  ```c
+  warming_threshold = get_warming_threshold(target_temperature);
+  float upper_bound = target_temperature + hysteresis_band;
+  float lower_bound = target_temperature - hysteresis_band - warming_threshold;
+
+  if (current_temperature < lower_bound)      control_state = CONTROL_STATE_HEATING;
+  else if (current_temperature > upper_bound) control_state = CONTROL_STATE_COOLING;
+  else                                        control_state = CONTROL_STATE_WARMING;
+  ```
+
+- 当 `control_state` 发生变化时：
+  - 先关闭 PWM 输出：`rt_pwm_set(pwm_dev, 0, PTC_PERIOD, 0);`
+  - 小延时确保安全
+  - 根据状态切换 `STATE_PIN`：
+    - `HEAT`：PWM 接到 MOS‑PTC，加热模式
+    - `COOL`：PWM 接到风扇，冷却模式
+  - 对应重置 PID 积分、防止跨模式积累
+
+### 2. PID 控制线程 [`pid_entry`](applications/main.c)
+
+独立线程（周期 $CONTROL\_PERIOD\_MS$，默认 100 ms）：
+
+- 读取 PTC 温度：
+  - `adc_dev = rt_device_find(PTC_TEMP_ADC);`
+  - `adc_value = rt_adc_read(adc_dev, PTC_ADC_CHANNEL);`
+  - 通过 NTC 分压计算 PTC 温度：
+
+    ```c
+    float voltage = (float)adc_val * ADC_REF_VOLTAGE / ADC_RESOLUTION;
+    float r_ntc   = NTC_SERIES_R * voltage / (ADC_REF_VOLTAGE - voltage);
+    float ln_r    = log(r_ntc / NTC_R25);
+    float t_k     = 1.0f / ((1.0f / 298.15f) + (ln_r / NTC_B_VALUE));
+    ptc_temperature = t_k - 273.15f;
+    ```
+
+- 状态依赖控制：
+
+  - `CONTROL_STATE_HEATING`（加热阶段）
+    - 目标为 PTC 目标温度：`target_temperature + heating_bias`
+    - PID 控制器：`pid_heat`（三参数 PID）
+    - 前馈：`get_feedforward_pwm(target_temperature + heating_bias)`  
+      前馈表 `ff_table[]` 为 PTC 目标温度 → PWM 占空比
+    - 对 PTC 温度做过温保护：超过 `PTC_MAX_SAFE_TEMP` 立即将输出置 0
+
+  - `CONTROL_STATE_WARMING`（保温阶段）
+    - 目标为 PTC 保温温度：`target_temperature + warming_bias`
+    - 同样使用 `pid_heat` + 前馈控制，但积分限幅相对较小，以避免保温时输出抖动过大
+
+  - `CONTROL_STATE_COOLING`（冷却阶段）
+    - 控制目标为箱内温度 `current_temperature` 跟踪 `target_temperature`
+    - 控制器 `pid_cool`，当前实现为 PI：
+      - 输出范围映射到风扇 PWM（`fan_min` ~ `fan_max`）
+    - 此时 `STATE_PIN` 已切换到 `COOL`，PWM 输出通过继电器驱动风扇
+
+- 最终输出：
+  - 所有模式下得到归一化占空比 `final_pwm_duty`（0.0~1.0）
+  - 统一通过 PWM 通道输出：
+
+    ```c
+    rt_uint32_t pulse = (rt_uint32_t)(final_pwm_duty * PTC_PERIOD);
+    rt_pwm_set(pwm_dev, 0, PTC_PERIOD, pulse);
+    ```
 
 ---
 
-## 主要模块说明
+## 硬件接口与 Kconfig 配置
 
-### 嵌入式控制核心 [`main.c`](applications/main.c:1)
+### 1. 系统变量与引脚定义 [`applications/system_vars.h`](applications/system_vars.h)
 
-- 线程：  
-  - `working_led()`：工作指示灯闪烁线程  
-  - `screen_on()`：OLED 刷新线程（定义在 [`screen.c`](applications/OLED/screen.c:7)）  
-  - `remote_start()`：板子端TCP服务器启动线程（定义在 [`remote.c`](applications/remote/remote.c)中）
-- 传感器初始化：  
-  - P3T1755：`p3t1755_init()`  
-  - DHT11：通过 `rt_device_find("temp_dht")` / `"humi_dht"` 打开  
-- 加热与风扇：  
-  - PTC 控制引脚：`PTC_PIN` / `BTM_PTC_PIN`  
-  - 风扇：`ys4028b12h_init()` + `ys4028b12h_set_speed()`  
-- 控制参数：  
-  - PID：`KP`, `KI`, `KD`  
-  - 风扇：`fan_speed_circulation`, `fan_min`, `fan_max`, `fan_smooth_alpha`  
-  - 预热阈值表：`warming_ff_table[]` 与 `evaluate_warming_threshold()`  
+- 模式切换：
+  - `STATE_PIN`：0=制热（PWM 信号传递给 MOS‑PTC），1=降温（PWM 信号传递给风扇）
+- PTC 相关：
+  - `PTC_TEMP_ADC` / `PTC_ADC_CHANNEL`：NTC 所在 ADC 通道
+  - `PTC_PERIOD = 1e9 / PKG_USING_PTC_FREQUENCY`：PWM 周期（纳秒）
+  - `PTC_MAX_SAFE_TEMP`：PTC 安全最高工作温度
+- NTC 参数：
+  - `NTC_R25`、`NTC_B_VALUE`、`NTC_SERIES_R`、`ADC_REF_VOLTAGE`、`ADC_RESOLUTION`
+- 控制周期：
+  - `$SAMPLE\_PERIOD\_MS$`：主循环采样周期
+  - `$CONTROL\_PERIOD\_MS$`：PID 控制周期
 
-### 远程 TCP 服务 [`remote.c`](applications/remote/remote.c:34)
+- PID 上下文：
+  - `pid_ctx_t` 包含 $K_P, K_I, K_D$、积分、前一误差、输出限幅等
+  - `pid_heat`：加热/保温 PID
+  - `pid_cool`：冷却 PI
 
-- 启动：  
-  - 由 `remote_start()` 创建线程 `remote_server_thread_entry`  
-  - 服务器监听端口：`SERVER_PORT = 5000`  
-- 协议：  
-  - 文本命令 + `\r\n` 结束  
-  - 支持命令：  
-    - `get_status`：返回一行 JSON 状态，字段包括：  
-      - `current_temperature`, `target_temperature`, `current_humidity`, `env_temperature`  
-      - `ptc_state`, `btm_ptc_state`, `control_state`  
-      - `fan_speed`, `fan_speed_percent`, `feedforward_speed`, `pid_output`  
-      - PID 参数、积分误差、预热阈值、风扇参数等  
-    - `pid_tune ...`：转发到 `pid_tune()` 处理  
-    - `fan_tune ...`：转发到 `fan_tune()` 处理  
+### 2. PWM 设备配置 [`applications/Kconfig`](applications/Kconfig)
 
-### OLED 显示 [`screen.c`](applications/OLED/screen.c:7)
+- 风扇 `YS4028B12H` 相关配置（仍然存在）  
+- MOS‑PTC 配置：
 
-- 使用 u8g2 I2C 驱动 SSD1306 128×64 OLED  
-- 每秒刷新一次：  
-  - 第一行显示当前 `control_state`（HEATING/COOLING/IDLE/WARMING）  
-  - 其余行显示当前温度、目标温度、环境温度  
+  - `PKG_USING_PTC_PWM_DEV_NAME`：MOS-PTC 使用的 PWM 设备名（默认 `"pwm0"`）
+  - `PKG_USING_PTC_PWM_CHANNEL`：PWM 通道号（默认 1）
+  - `PKG_USING_PTC_FREQUENCY`：PWM 频率（Hz），用于计算 `PTC_PERIOD`
 
-### WebSocket 代理 [`websocket_proxy.py`](applications/remote/websocket_proxy.py:1)
+这些配置最终由 `initialization()` 中的：
 
-- 与板子 TCP 服务器建立长连接，周期性发送 `get_status` 命令  
-- 将返回的 JSON 状态广播给所有 WebSocket 客户端  
-- 接收 WebSocket 客户端发来的命令字符串，转发给板子 TCP 服务  
-- 默认：  
-  - TCP 目标：`TCP_SERVER_IP = "板子的IP"`, 端口 `5000`  
-  - WebSocket 监听：`WS_SERVER_IP = "0.0.0.0"`, 端口 `8765`  
+```c
+pwm_dev = (rt_pwm_t)rt_device_find(PKG_USING_PTC_PWM_DEV_NAME);
+rt_pwm_set(pwm_dev, 0, PTC_PERIOD, 0);
+rt_pwm_enable(pwm_dev, 0);
+```
 
-### Web 前端仪表盘 [`applications/HTML`](applications/HTML/index.html:1)
+绑定到实际硬件。
 
-- 使用 HTML/CSS/JS + `lightweight-charts` 绘制温度历史 K 线  
-- 模块化布局：  
-  - 实时温度“温度计”视图，显示：  
-    - 当前温度、目标温度  
-    - 上下界、预热区间  
-  - 实时指标面板：  
-    - 传感器读数  
-    - PTCT/底部加热状态  
-    - 控制状态、预热阈值、迟滞带  
-    - 风扇输出、前馈、PID 输出、误差等  
-  - 控制面板：  
-    - 目标温度输入  
-    - PID 参数输入  
-    - 风扇参数输入（迟滞带、循环风、最小/最大风速、平滑系数）  
-    - 预热阈值表编辑  
-  - 历史温度图：  
-    - 以 1 分钟为周期的蜡烛图展示 `current_temperature`  
+---
+
+## 远程 TCP 服务与协议更新
+
+### TCP 服务 [`applications/remote/remote.c`](applications/remote/remote.c)
+
+- 监听端口：`SERVER_PORT = 5000`
+- 命令格式：文本 + `\r\n` 结尾
+- 支持命令：
+  - `get_status`
+    - 返回 JSON，字段：
+
+      - `current_ptc_temperature`：PTC 温度（NTC 计算）
+      - `current_temperature`：箱内温度（DHT）
+      - `target_temperature`：目标箱内温度
+      - `current_humidity`：箱内湿度
+      - `env_temperature`：环境温度
+      - `ptc_state`：`HEAT` 时 `"ON"` 否则 `"OFF"`（实质为加热/冷却模式标识）
+      - `control_state`：`HEATING/WARMING/COOLING`
+      - `current_pwm`：当前 PWM 占空比
+      - `heat_kp/heat_ki/heat_kd`：加热 PID 参数
+      - `cool_kp/cool_ki`：冷却 PI 参数
+      - `warming_bias/heating_bias`：PTC 温度偏置
+      - `warming_threshold/hysteresis_band`：状态机相关参数
+
+  - `tune ...`
+    - 透传到 `tune(argc, argv)`，用于统一调参（详见下一节）
+
+---
+
+## 调参接口
+
+### MSH 命令 `tune` [`applications/main.c`](applications/main.c)
+
+统一的调参入口，典型用法：
+
+- 目标温度与状态机：
+  - `tune target <val>`：设置箱内目标温度（°C）
+  - `tune hys <val>`：设置迟滞带（°C）
+  - `tune warmbias <val>`：保温阶段 PTC 目标偏置（°C）
+  - `tune heatbias <val>`：加热阶段 PTC 目标偏置（°C）
+
+- 前馈表：
+  - `tune ff 0 <temp> <value>`：调整 PTC 前馈表中某温度点的 PWM 基值
+    - 表结构在 `ff_table[]` 中，`target_temp -> base_pwm`
+    - 当前只支持修改已有点（±2°C 范围），不支持新增条目（TODO）
+
+  - `tune ff 1 <temp> <value>`：调整 `warming_ff_table[]` 中的预热阈值：
+    - 影响 `warming_threshold` 插值，用于决定 HEATING → WARMING 的区间
+
+- PID 参数：
+  - 加热/保温 PID：
+    - `tune heat kp <val>`
+    - `tune heat ki <val>`
+    - `tune heat kd <val>`
+  - 冷却 PI：
+    - `tune cool kp <val>`
+    - `tune cool ki <val>`
+
+- 无参数时：
+  - 直接打印当前状态（等效于 `get_status` 加 PID 内部变量）
+
+### `get_status` 输出 [`applications/main.c`](applications/main.c)
+
+- 打印：
+  - 状态机状态、箱内温度、PTC 温度、湿度、PWM 占空比、迟滞带
+  - 加热 PID / 冷却 PI 的当前参数与内部积分、上一误差  
+ 便于线下通过串口快速调参与验证。
+
+---
+
+## Web/PC 侧与之前基本保持一致
+
+- WebSocket 代理 [`applications/remote/websocket_proxy.py`](applications/remote/websocket_proxy.py)：
+  - 周期性向板端 TCP 服务器发送 `get_status`，解析 JSON 后广播给所有 WebSocket 客户端
+  - 客户端发送的任意命令行（如 `tune ...`）会被转发给板子
+
+- Web 前端 [`applications/HTML/index.html`](applications/HTML/index.html)：
+  - 仪表盘结构、历史 K 线等与之前一致
+  - 可根据 `current_ptc_temperature` 等新字段扩展显示内容（如增加 PTC 温度曲线）
 
 ---
 
 ## 编译与运行
 
-> 本项目使用RT-Thread Env的scons构建工程，板子选用NXP FDRM-MCXA156，请按自身项目实际情况调整。
+> 本项目使用 RT-Thread Env 的 scons 构建工程，板子选用 NXP FDRM‑MCXA156，请按自身项目实际情况调整。
 
 ### 1. 硬件与 RT-Thread 工程
 
-- MCU 平台：参考 [`board`](board/board.c:1) 与 `board/MCUX_Config/board/MCXA156.mex` 中配置  
+- MCU 平台：参考 [`board`](board/board.c) 与 `board/MCUX_Config/board/MCXA156.mex` 中配置  
 - RT-Thread 版本：`rt-thread-5.2.1`（已包含在仓库中）  
-- 需要配置：  
-  - PIN 驱动、I2C、PWM、WDT 等驱动  
+- 必要组件：
+  - PIN 驱动、I2C、PWM、ADC、WDT 等驱动  
   - 网络协议栈（lwIP 等），确保 socket/TCP 可用  
-  - WLAN 驱动，满足代码中 `rt_wlan_connect` 的调用  
+  - WLAN 驱动，满足 `rt_wlan_connect` 调用  
 
 ### 2. 编译固件
 
-- 使用 Keil/MDK 或 SCons，根据本仓库现有工程文件构建：  
-  - Keil 工程：[project.uvprojx](project.uvprojx:1)  
+- 根据已有工程文件构建：
+  - VSCode 工程：`scons --target=vsc`
+  - Keil 工程：`scons --target=mdk` [project.uvprojx](project.uvprojx)  
   - SCons 配置：[`applications/SConscript`](applications/SConscript:1)、[`board/SConscript`](board/SConscript:1)、[`Libraries/drivers/SConscript`](Libraries/drivers/SConscript:1)  
 - 编译得到固件并烧录到目标板  
 
 ### 3. 网络配置
 
-在 [`main.c`](applications/main.c:235) 中：
+在 [`applications/main.c`](applications/main.c) 中：
 
 ```c
 rt_wlan_connect("142A_SecurityPlus", "142a8888");
@@ -201,86 +313,42 @@ rt_wlan_connect("142A_SecurityPlus", "142a8888");
 
    按实际情况修改其中的 `TCP_SERVER_IP`（板子 IP）和端口。  
 
-3. 在 PC 上打开前端页面  
-   直接用浏览器打开：  
+3. 在 PC 上打开前端页面：  
 
    ```text
    applications/HTML/index.html
    ```
 
-   页面中的脚本会连接到 `ws://<PC-IP>:8765`（可在 [`script.js`](applications/HTML/script.js:1) 中查看/修改）。  
+   页面中的脚本会连接到 `ws://<PC-IP>:8765`（可在 [`script.js`](applications/HTML/script.js) 中查看/修改）。  
 
 4. 在浏览器中：  
-   - 实时查看温度、控制状态、风扇/加热器状态  
-   - 在线调整目标温度、PID 参数、风扇参数、预热阈值表  
-   - 通过历史 K 线观察温度控制效果
+   - 实时查看箱内温度、PTC 温度、控制状态、PWM 占空比等  
+   - 在线发送 `tune` 命令，调整目标温度、PID 参数、前馈表、偏置和迟滞  
+   - 利用历史 K 线/曲线观察温控性能和 overshoot/settling time
 
-![控制面板](./assets/dashboard.png)
-![历史数据](./assets/history.png)
-
-> 选用K线图是看起来比较有意思，请替换为你喜欢的画法，比如折线图？
-
----
-
-## 调参说明
-
-### 1. PID 调整
-
-- 通过 MSH 命令 `pid_tune`（定义见 [`main.c`](applications/main.c:95)）或通过 TCP/前端调用  
-- PID 目标：  
-  - 稳定跟踪设定温度，避免超调过大  
-  - 冷却阶段主要依赖 PID + 前馈进行风扇控制  
-
-推荐从较小的 $K_P$ 和接近 0 的 $K_I$ 开始，逐步增大 $K_P$，观察响应速度与震荡，之后再调 $K_I$ 以减小稳态误差。
-
-### 2. 风扇参数 `fan_tune`
-
-命令定义在 [`main.c`](applications/main.c:416)：
-
-- `fan_tune -show`  
-  打印当前风扇相关参数  
-- `fan_tune -hys <val>`  
-  设置迟滞范围（°C），调节切换加热/冷却/保温的敏感度  
-- `fan_tune -circ <val>`  
-  设置加热/保温阶段的循环风速度  
-- `fan_tune -min <val> -max <val>`  
-  限制风扇速度输出范围  
-- `fan_tune -alpha <val>`  
-  一阶滤波系数，越大响应越快但波动越大  
-- `fan_tune -warm_table`  
-  打印预热阈值表  
-- `fan_tune -warm_set <idx> <target> <threshold>`  
-  在线修改预热阈值表某一行数据，用于优化当前机箱与负载的热惯性匹配  
-
-### 3. 预热阈值表
-
-[`applications/main.c`](applications/main.c:83) 中的 `warming_ff_table[]`：
-
-- 按目标温度映射一个“预热阈值”，用于定义从 HEATING 切换到 WARMING 的区间宽度  
-- 通过插值计算得到 `warming_threshold`，配合 `hysteresis_band` 决定温控状态机的切换区间  
-
+[history](assets/history.png)
+> K线图看起来比较有意思而已，可以随便换
 ---
 
 ## 目录结构
 
-仅列出与温控箱功能相关的关键目录：
-
 - `applications/`  
-  - `main.c`：主控制逻辑、PID 与风扇控制、PTC 状态机  
-  - `system_vars.h`：跨模块共享的状态与控制参数  
-  - `fan/`：风扇驱动与配置  
+  - `main.c`：主状态机、PID 线程、前馈表、初始化入口  
+  - `system_vars.h`：全局变量、PID 上下文、引脚与 ADC/NTC 参数定义  
+  - `Kconfig`：风扇与 MOS‑PTC PWM 设备配置  
   - `OLED/screen.c`：OLED 显示线程  
   - `remote/remote.c`：板载 TCP 服务器  
   - `remote/websocket_proxy.py`：PC 端 WebSocket 代理  
   - `HTML/`：前端仪表盘页面与脚本  
-- `board/`：板级支持包、时钟、引脚、链接脚本等  
-- `Libraries/drivers/`：外设驱动（ADC、PWM、I2C、UART等）  
+- `board/`：BSP、时钟、引脚、链接脚本等  
+- `Libraries/drivers/`：外设驱动（ADC、PWM、I2C、UART 等）  
 - `rt-thread-5.2.1/`：RT-Thread 内核及组件  
 
 ---
 
 ## 注意事项
 
-- DHT11 读取温度比较容易失败，主循环中已做简单处理避免刷屏，建议替换为更好的 
-- 温控系统涉及发热元件，务必在真实设备上做好过温保护与硬件冗余，不要仅依赖软件  
-- WiFi SSID/密码、TCP/IP 地址等请全部替换为你自己的环境配置  
+- PTC 为大功率发热件，本项目因为选用110°的PTC，所以仅通过软件限制 `PTC_MAX_SAFE_TEMP`。
+- NTC 参数（R25、B 值、分压电阻）请根据实际选型更新，否则 PTC 温度估算会有偏差，影响 PID 和保护
+- `STATE_PIN` 接继电器逻辑必须与硬件一致：避免在 HEAT 模式下同时驱动风扇，或者产生意外短路路径
+- DHT11 读取温度比较容易失败，而且数据滞后也比较严重，如果手头有更好的建议换掉
