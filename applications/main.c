@@ -33,8 +33,8 @@ volatile float ptc_temperature = 25.0f;        // PTC温度值
 
 /* 温控参数 */
 float warming_threshold = 3.0f;       // 当前保温阈值 (由前馈表决定)
-float warming_bias = 8.0f;            // 保温偏置温度（PTC温度高于目标温度多少用于保温）
-float heating_bias = 20.0f;           // 加热偏置温度（PTC温度高于目标温度多少用于加热）
+float warming_bias = 10.0f;           // 保温偏置温度（PTC温度高于目标温度多少用于保温）
+float heating_bias = 25.0f;           // 加热偏置温度（PTC温度高于目标温度多少用于加热）
 float hysteresis_band = 2.0f;         // 迟滞范围
 float fan_min = 0.00f;                // 最小风速
 float fan_max = 0.63f;                // 最大风速
@@ -111,6 +111,12 @@ int main(void)
         return -RT_ERROR;
     }
     /* 启动线程 */
+    pid_thread = rt_thread_create("PIDControl", pid_entry, RT_NULL, 1024, 10, 30);
+    if (pid_thread != RT_NULL) {
+        rt_thread_startup(pid_thread);
+    }
+    /* 启动远程控制服务器 */
+    remote_start(0, RT_NULL);
     working_indicate = rt_thread_create("WorkingIndicate", working_led, RT_NULL, 256, 11, 20);
     screen_thread = rt_thread_create("ScreenUpdate", screen_on, RT_NULL, 2048, 12, 20);
     if(working_indicate != RT_NULL && screen_thread != RT_NULL)
@@ -118,10 +124,6 @@ int main(void)
         rt_thread_startup(working_indicate);
         rt_thread_startup(screen_thread);
         rt_kprintf("Screen & Indicating Threads started successfully.\n");
-    }
-    pid_thread = rt_thread_create("PIDControl", pid_entry, RT_NULL, 1024, 10, 30);
-    if (pid_thread != RT_NULL) {
-        rt_thread_startup(pid_thread);
     }
     /***************************************************************************
      * 温控状态控制循环
@@ -153,7 +155,7 @@ int main(void)
         
         // 处理状态切换
         if (control_state != previous_state) {
-            rt_kprintf("State Changed: %s -> %s\n", control_state_to_string(previous_state), control_state_to_string(control_state));
+            // rt_kprintf("State Changed: %s -> %s\n", control_state_to_string(previous_state), control_state_to_string(control_state));
             // 安全措施：切换前关闭PWM
             rt_pwm_set(pwm_dev, 0, PTC_PERIOD, 0);
             rt_thread_mdelay(20);
@@ -266,7 +268,8 @@ rt_err_t initialization()
     /* 初始化控制状态 */
     ptc_state = HEAT;
     control_state = CONTROL_STATE_WARMING;
-    // 加热PID (需要整定)
+    // 加热PID 
+    //TODO!:(需要整定，等我建模好了再说，或者可以使用一些机器学习方法，把目标函数黑盒转换为凸函数，然后做凸优化)
     pid_heat.kp = 1.37f;
     pid_heat.ki = 0.10f;
     pid_heat.kd = 0.8f;
@@ -313,10 +316,8 @@ rt_err_t initialization()
     }
 
     /* 连接 WiFi */
-    // result |= rt_wlan_connect("142A_SecurityPlus", "142a8888");
-    // rt_thread_mdelay(5000); // 等待连接稳定
-    /* 启动远程控制服务器 */
-    // remote_start(0, RT_NULL);
+    result |= rt_wlan_connect("142A_SecurityPlus", "142a8888");
+    rt_thread_mdelay(5000); // 等待连接稳定
     return result;
 }
 
@@ -431,7 +432,9 @@ void tune(int argc, char **argv)
         rt_kprintf("\n----- Usage -----\n");
         rt_kprintf("  tune target <val>          (Set target temperature in C)\n");
         rt_kprintf("  tune hys <val>             (Set hysteresis band in C)\n");
-        rt_kprintf("  tune ptcff <temp> <val>    (Set feedforward PWM for given PTC temp)\n");
+        rt_kprintf("  tune warmbias <val>        (Set warming bias temperature in C)\n");
+        rt_kprintf("  tune heatbias <val>        (Set heating bias temperature in C)\n");
+        rt_kprintf("  tune ff <0-ptc/1-warmt> <temp> <val> (Set feedforward value)\n");
         rt_kprintf("  tune heat <kp|ki|kd> <val> (Tune heating/warming PID)\n");
         rt_kprintf("  tune cool <kp|ki> <val>    (Tune cooling PI)\n");
         rt_kprintf("\n----- Example -----\n");
@@ -453,6 +456,16 @@ void tune(int argc, char **argv)
         if (argc != 3) { rt_kprintf("Usage: tune hys <value>\n"); return; }
         hysteresis_band = atof(argv[2]);
         rt_kprintf("Hysteresis band set to +/- %.2f C\n", hysteresis_band);
+    }
+    else if (strcmp(cmd, "warmbias") == 0) {
+        if (argc != 3) { rt_kprintf("Usage: tune warmbias <value>\n"); return; }
+        warming_bias = atof(argv[2]);
+        rt_kprintf("Warming bias temperature set to %.2f C\n", warming_bias);
+    }
+    else if (strcmp(cmd, "heatbias") == 0) {
+        if (argc != 3) { rt_kprintf("Usage: tune heatbias <value>\n"); return; }
+        heating_bias = atof(argv[2]);
+        rt_kprintf("Heating bias temperature set to %.2f C\n", heating_bias);
     }
     else if (strcmp(cmd, "ff") == 0) {
         if (argc != 5) { rt_kprintf("Usage: tune ff <target(0-ptc/1-warmt)> <temp> <value>\n"); return; }

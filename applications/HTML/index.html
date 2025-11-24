@@ -119,10 +119,10 @@
               </div>
             </div>
             <div class="metric-card">
-              <div class="metric-icon"><i class="fas fa-fire"></i></div>
+              <div class="metric-icon"><i class="fas fa-temperature-full"></i></div>
               <div class="metric-info">
-                <span class="label">Bottom Heater:</span>
-                <span id="btm_ptc_state" class="value">--</span>
+                <span class="label">PTC Temperature:</span>
+                <span id="current_ptc_temperature" class="value">--</span>
               </div>
             </div>
             <div class="metric-card">
@@ -130,6 +130,20 @@
               <div class="metric-info">
                 <span class="label">Control State:</span>
                 <span id="control_state" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-percentage"></i></div>
+              <div class="metric-info">
+                <span class="label">PWM Duty (%):</span>
+                <span id="pwm_percent" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-wave-square"></i></div>
+              <div class="metric-info">
+                <span class="label">PWM Duty (0-1):</span>
+                <span id="current_pwm" class="value">--</span>
               </div>
             </div>
             <div class="metric-card">
@@ -146,59 +160,18 @@
                 <span id="hysteresis_band" class="value">--</span>
               </div>
             </div>
-          </div>
-        </div>
-
-        <div class="metrics-section">
-          <h3><i class="fas fa-fan"></i> Fan Control</h3>
-          <div class="grid-container">
             <div class="metric-card">
-              <div class="metric-icon"><i class="fas fa-fan"></i></div>
+              <div class="metric-icon"><i class="fas fa-temperature-half"></i></div>
               <div class="metric-info">
-                <span class="label">Fan Output (%):</span>
-                <span id="fan_speed_percent" class="value">--</span>
+                <span class="label">Warming Bias:</span>
+                <span id="warming_bias" class="value">--</span>
               </div>
             </div>
             <div class="metric-card">
-              <div class="metric-icon"><i class="fas fa-fan"></i></div>
+              <div class="metric-icon"><i class="fas fa-temperature-high"></i></div>
               <div class="metric-info">
-                <span class="label">Fan Output (0-1):</span>
-                <span id="fan_speed" class="value">--</span>
-              </div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-icon"><i class="fas fa-forward"></i></div>
-              <div class="metric-info">
-                <span class="label">Feedforward Speed:</span>
-                <span id="feedforward_speed" class="value">--</span>
-              </div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-icon"><i class="fas fa-fan"></i></div>
-              <div class="metric-info">
-                <span class="label">Circulation Speed:</span>
-                <span id="fan_speed_circulation" class="value">--</span>
-              </div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-icon"><i class="fas fa-fan"></i></div>
-              <div class="metric-info">
-                <span class="label">Fan Min:</span>
-                <span id="fan_min" class="value">--</span>
-              </div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-icon"><i class="fas fa-fan"></i></div>
-              <div class="metric-info">
-                <span class="label">Fan Max:</span>
-                <span id="fan_max" class="value">--</span>
-              </div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-icon"><i class="fas fa-wave-square"></i></div>
-              <div class="metric-info">
-                <span class="label">Smooth Alpha:</span>
-                <span id="fan_smooth_alpha" class="value">--</span>
+                <span class="label">Heating Bias:</span>
+                <span id="heating_bias" class="value">--</span>
               </div>
             </div>
           </div>
@@ -208,45 +181,38 @@
           <h3><i class="fas fa-sliders-h"></i> PID Diagnostics</h3>
           <div class="grid-container">
             <div class="metric-card">
-              <div class="metric-icon"><i class="fas fa-project-diagram"></i></div>
+              <div class="metric-icon"><i class="fas fa-equals"></i></div>
               <div class="metric-info">
-                <span class="label">PID Output:</span>
-                <span id="pid_output" class="value">--</span>
+                <span class="label">Heat PID Kp:</span>
+                <span id="heat_kp" class="value">--</span>
               </div>
             </div>
             <div class="metric-card">
               <div class="metric-icon"><i class="fas fa-equals"></i></div>
               <div class="metric-info">
-                <span class="label">PID KP:</span>
-                <span id="pid_kp" class="value">--</span>
+                <span class="label">Heat PID Ki:</span>
+                <span id="heat_ki" class="value">--</span>
               </div>
             </div>
             <div class="metric-card">
               <div class="metric-icon"><i class="fas fa-equals"></i></div>
               <div class="metric-info">
-                <span class="label">PID KI:</span>
-                <span id="pid_ki" class="value">--</span>
+                <span class="label">Heat PID Kd:</span>
+                <span id="heat_kd" class="value">--</span>
               </div>
             </div>
             <div class="metric-card">
               <div class="metric-icon"><i class="fas fa-equals"></i></div>
               <div class="metric-info">
-                <span class="label">PID KD:</span>
-                <span id="pid_kd" class="value">--</span>
+                <span class="label">Cool PI Kp:</span>
+                <span id="cool_kp" class="value">--</span>
               </div>
             </div>
             <div class="metric-card">
-              <div class="metric-icon"><i class="fas fa-arrows-left-right-to-line"></i></div>
+              <div class="metric-icon"><i class="fas fa-equals"></i></div>
               <div class="metric-info">
-                <span class="label">Integral Error:</span>
-                <span id="integral_error" class="value">--</span>
-              </div>
-            </div>
-            <div class="metric-card">
-              <div class="metric-icon"><i class="fas fa-history"></i></div>
-              <div class="metric-info">
-                <span class="label">Previous Error:</span>
-                <span id="previous_error" class="value">--</span>
+                <span class="label">Cool PI Ki:</span>
+                <span id="cool_ki" class="value">--</span>
               </div>
             </div>
           </div>
@@ -273,6 +239,13 @@
 
         <div class="controls-section">
           <h3><i class="fas fa-sliders-h"></i> Manual PID Override</h3>
+          <div class="control-group">
+            <label for="pid_mode_select">Controller:</label>
+            <select id="pid_mode_select" class="control-input">
+              <option value="heat" selected>Heating / Warming</option>
+              <option value="cool">Cooling Fan</option>
+            </select>
+          </div>
           <div class="control-group">
             <label for="kp_input">Kp:</label>
             <input type="number" id="kp_input" step="0.0001" class="control-input">
@@ -324,30 +297,22 @@
         </div>
 
         <div class="controls-section">
-          <h3><i class="fas fa-fan"></i> Fan Control Parameters</h3>
+          <h3><i class="fas fa-exchange-alt"></i> Hysteresis & Bias</h3>
           <div class="control-group">
             <label for="hysteresis_band_input">Hysteresis Band (°C):</label>
             <input type="number" id="hysteresis_band_input" step="0.1" class="control-input">
+            <button id="set_hysteresis_btn" class="control-button"><i class="fas fa-check"></i> Apply</button>
           </div>
           <div class="control-group">
-            <label for="fan_speed_circulation_input">Circulation Speed (0-1):</label>
-            <input type="number" id="fan_speed_circulation_input" step="0.01" min="0" max="1" class="control-input">
-          </div>
-          <div class="dual-input-row">
-            <div class="control-group">
-              <label for="fan_min_input">Fan Min (0-1):</label>
-              <input type="number" id="fan_min_input" step="0.01" min="0" max="1" class="control-input">
-            </div>
-            <div class="control-group">
-              <label for="fan_max_input">Fan Max (0-1):</label>
-              <input type="number" id="fan_max_input" step="0.01" min="0" max="1" class="control-input">
-            </div>
+            <label for="warming_bias_input">Warming Bias (°C):</label>
+            <input type="number" id="warming_bias_input" step="0.1" class="control-input">
+            <button id="set_warming_bias_btn" class="control-button"><i class="fas fa-check"></i> Apply</button>
           </div>
           <div class="control-group">
-            <label for="fan_smooth_alpha_input">Smooth Alpha (0-1):</label>
-            <input type="number" id="fan_smooth_alpha_input" step="0.01" min="0" max="1" class="control-input">
+            <label for="heating_bias_input">Heating Bias (°C):</label>
+            <input type="number" id="heating_bias_input" step="0.1" class="control-input">
+            <button id="set_heating_bias_btn" class="control-button"><i class="fas fa-check"></i> Apply</button>
           </div>
-          <button id="set_fan_btn" class="control-button"><i class="fas fa-check"></i> Set Fan Params</button>
         </div>
       </div>
     </div>

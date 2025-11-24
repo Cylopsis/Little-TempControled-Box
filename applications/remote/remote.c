@@ -126,6 +126,8 @@ static void remote_server_thread_entry(void *parameter)
                     "\"heat_kd\":%.2f,"\
                     "\"cool_kp\":%.2f,"\
                     "\"cool_ki\":%.2f,"\
+                    "\"warming_bias\":%.2f,"\
+                    "\"heating_bias\":%.2f,"\
                     "\"warming_threshold\":%.2f,"\
                     "\"hysteresis_band\":%.2f"\
                     "}\r\n",
@@ -142,6 +144,8 @@ static void remote_server_thread_entry(void *parameter)
                     pid_heat.kd,
                     pid_cool.kp,
                     pid_cool.ki,
+                    warming_bias,
+                    heating_bias,
                     warming_threshold,
                     hysteresis_band
                 );

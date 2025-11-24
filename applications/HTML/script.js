@@ -18,12 +18,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const kdInput = document.getElementById('kd_input');
     const setTargetBtn = document.getElementById('set_target_btn');
     const setPidBtn = document.getElementById('set_pid_btn');
+    const pidModeSelect = document.getElementById('pid_mode_select');
     const hysteresisBandInput = document.getElementById('hysteresis_band_input');
-    const fanSpeedCirculationInput = document.getElementById('fan_speed_circulation_input');
-    const fanMinInput = document.getElementById('fan_min_input');
-    const fanMaxInput = document.getElementById('fan_max_input');
-    const fanSmoothAlphaInput = document.getElementById('fan_smooth_alpha_input');
-    const setFanBtn = document.getElementById('set_fan_btn');
+    const setHysteresisBtn = document.getElementById('set_hysteresis_btn');
+    const warmingBiasInput = document.getElementById('warming_bias_input');
+    const heatingBiasInput = document.getElementById('heating_bias_input');
+    const setWarmingBiasBtn = document.getElementById('set_warming_bias_btn');
+    const setHeatingBiasBtn = document.getElementById('set_heating_bias_btn');
     const ffTableBody = document.getElementById('ff_table_body');
     const warmingTableBody = document.getElementById('warming_table_body');
         const lowerBoundMarker = document.getElementById('lower-bound-marker');
@@ -58,27 +59,21 @@ document.addEventListener('DOMContentLoaded', () => {
     const formatters = {
         current_temperature: (v) => `${v.toFixed(2)} °C`,
         target_temperature: (v) => `${v.toFixed(2)} °C`,
-        fan_speed_percent: (v) => `${v.toFixed(1)} %`,
         current_humidity: (v) => `${v.toFixed(1)} %`,
         env_temperature: (v) => `${v.toFixed(2)} °C`,
-        fan_speed: (v) => v.toFixed(4),
-        feedforward_speed: (v) => v.toFixed(4),
-        pid_output: (v) => v.toFixed(4),
-        pid_kp: (v) => v.toFixed(6),
-        pid_ki: (v) => v.toFixed(6),
-        pid_kd: (v) => v.toFixed(6),
-        integral_error: (v) => v.toFixed(4),
-        previous_error: (v) => v.toFixed(4),
+        current_ptc_temperature: (v) => `${v.toFixed(2)} °C`,
+        pwm_percent: (v) => `${v.toFixed(1)} %`,
+        current_pwm: (v) => v.toFixed(4),
+        heat_kp: (v) => v.toFixed(6),
+        heat_ki: (v) => v.toFixed(6),
+        heat_kd: (v) => v.toFixed(6),
+        cool_kp: (v) => v.toFixed(6),
+        cool_ki: (v) => v.toFixed(6),
         warming_threshold: (v) => `${v.toFixed(3)} °C`,
         hysteresis_band: (v) => `${v.toFixed(3)} °C`,
-        fan_speed_circulation: (v) => v.toFixed(4),
-        fan_min: (v) => v.toFixed(4),
-        fan_max: (v) => v.toFixed(4),
-        fan_smooth_alpha: (v) => v.toFixed(4)
+        warming_bias: (v) => `${v.toFixed(2)} °C`,
+        heating_bias: (v) => `${v.toFixed(2)} °C`
     };
-
-    formatters.current_humidity = (v) => `${v.toFixed(1)} %`;
-    formatters.env_temperature = (v) => `${v.toFixed(2)} °C`;
 
     const ffTableInitial = [
         { temperature: 20.0, baseSpeed: 0.00 },
@@ -442,33 +437,38 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    function enrichTelemetry(data) {
+        const enriched = { ...data };
+        if (Number.isFinite(data.current_pwm)) {
+            enriched.pwm_percent = data.current_pwm * 100.0;
+        }
+        if (enriched.current_ptc_temperature === undefined && Number.isFinite(enriched.ptc_temperature)) {
+            enriched.current_ptc_temperature = enriched.ptc_temperature;
+        }
+        return enriched;
+    }
+
     function initializeControlPanel(data) {
         if (Number.isFinite(data.target_temperature)) {
             targetTemperatureInput.value = data.target_temperature.toFixed(1);
         }
-        if (Number.isFinite(data.pid_kp)) {
-            kpInput.value = data.pid_kp.toFixed(6);
+        if (Number.isFinite(data.heat_kp)) {
+            kpInput.value = data.heat_kp.toFixed(6);
         }
-        if (Number.isFinite(data.pid_ki)) {
-            kiInput.value = data.pid_ki.toFixed(6);
+        if (Number.isFinite(data.heat_ki)) {
+            kiInput.value = data.heat_ki.toFixed(6);
         }
-        if (Number.isFinite(data.pid_kd)) {
-            kdInput.value = data.pid_kd.toFixed(6);
+        if (Number.isFinite(data.heat_kd)) {
+            kdInput.value = data.heat_kd.toFixed(6);
         }
         if (hysteresisBandInput && Number.isFinite(data.hysteresis_band)) {
             hysteresisBandInput.value = data.hysteresis_band.toFixed(3);
         }
-        if (fanSpeedCirculationInput && Number.isFinite(data.fan_speed_circulation)) {
-            fanSpeedCirculationInput.value = data.fan_speed_circulation.toFixed(4);
+        if (warmingBiasInput && Number.isFinite(data.warming_bias)) {
+            warmingBiasInput.value = data.warming_bias.toFixed(2);
         }
-        if (fanMinInput && Number.isFinite(data.fan_min)) {
-            fanMinInput.value = data.fan_min.toFixed(4);
-        }
-        if (fanMaxInput && Number.isFinite(data.fan_max)) {
-            fanMaxInput.value = data.fan_max.toFixed(4);
-        }
-        if (fanSmoothAlphaInput && Number.isFinite(data.fan_smooth_alpha)) {
-            fanSmoothAlphaInput.value = data.fan_smooth_alpha.toFixed(4);
+        if (heatingBiasInput && Number.isFinite(data.heating_bias)) {
+            heatingBiasInput.value = data.heating_bias.toFixed(2);
         }
         updateScaleLabels();
     }
@@ -514,7 +514,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const temperature = document.getElementById(`ff-h-${index}`).value;
                 const speed = document.getElementById(`ff-s-${index}`).value;
                 if (temperature !== '' && speed !== '') {
-                    const command = `pid_tune -ff_set ${index} ${temperature} ${speed}`;
+                    const command = `tune ff 0 ${temperature} ${speed}`;
                     console.log(`Sending command: ${command}`);
                     websocket.send(command);
                 }
@@ -545,7 +545,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const targetValue = targetInput.value;
                 const thresholdValue = thresholdInput.value;
                 if (targetValue !== '' && thresholdValue !== '') {
-                    const command = `fan_tune -warm_set ${index} ${targetValue} ${thresholdValue}`;
+                    const command = `tune ff 1 ${targetValue} ${thresholdValue}`;
                     console.log(`Sending command: ${command}`);
                     websocket.send(command);
                 }
@@ -569,7 +569,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     websocket.onmessage = (event) => {
         try {
-            const data = JSON.parse(event.data);
+            const raw = JSON.parse(event.data);
+            const data = enrichTelemetry(raw);
             if (isFirstMessage) {
                 initializeControlPanel(data);
                 isFirstMessage = false;
@@ -625,51 +626,82 @@ document.addEventListener('DOMContentLoaded', () => {
     setTargetBtn.addEventListener('click', () => {
         const targetValue = targetTemperatureInput.value;
         if (targetValue !== '') {
-            const command = `pid_tune -t ${targetValue}`;
+            const command = `tune target ${targetValue}`;
             console.log(`Sending command: ${command}`);
             websocket.send(command);
         }
     });
 
     setPidBtn.addEventListener('click', () => {
+        const mode = pidModeSelect ? pidModeSelect.value : 'heat';
+        const params = [];
         const p = kpInput.value;
         const i = kiInput.value;
         const d = kdInput.value;
-        let command = 'pid_tune';
+        if (p !== '') params.push({ param: 'kp', value: p });
+        if (i !== '') params.push({ param: 'ki', value: i });
+        if (d !== '') params.push({ param: 'kd', value: d });
 
-        if (p !== '') command += ` -p ${p}`;
-        if (i !== '') command += ` -i ${i}`;
-        if (d !== '') command += ` -d ${d}`;
+        const filtered = params.filter(({ param }) => !(mode === 'cool' && param === 'kd'));
+        if (filtered.length === 0) {
+            if (mode === 'cool' && params.some(({ param }) => param === 'kd')) {
+                console.warn('Cooling PI does not support Kd. Ignoring.');
+            }
+            return;
+        }
 
-        if (command !== 'pid_tune') {
+        filtered.forEach(({ param, value }) => {
+            const command = `tune ${mode} ${param} ${value}`;
             console.log(`Sending command: ${command}`);
             websocket.send(command);
-        }
+        });
     });
 
-    if (setFanBtn) {
-        setFanBtn.addEventListener('click', () => {
-            const parts = [];
-            const hys = hysteresisBandInput ? hysteresisBandInput.value : '';
-            const circ = fanSpeedCirculationInput ? fanSpeedCirculationInput.value : '';
-            const fmin = fanMinInput ? fanMinInput.value : '';
-            const fmax = fanMaxInput ? fanMaxInput.value : '';
-            const alpha = fanSmoothAlphaInput ? fanSmoothAlphaInput.value : '';
+    function syncKdInputState() {
+        if (!pidModeSelect || !kdInput) {
+            return;
+        }
+        const coolingMode = pidModeSelect.value === 'cool';
+        kdInput.disabled = coolingMode;
+        kdInput.placeholder = coolingMode ? 'N/A for cooling PI' : '';
+        if (coolingMode) {
+            kdInput.value = '';
+        }
+    }
 
-            if (hys !== '') parts.push(`-hys ${hys}`);
-            if (circ !== '') parts.push(`-circ ${circ}`);
-            if (fmin !== '') parts.push(`-min ${fmin}`);
-            if (fmax !== '') parts.push(`-max ${fmax}`);
-            if (alpha !== '') parts.push(`-alpha ${alpha}`);
+    if (pidModeSelect) {
+        pidModeSelect.addEventListener('change', syncKdInputState);
+        syncKdInputState();
+    }
 
-            if (parts.length === 0) {
-                const command = 'fan_tune -show';
-                console.log(`Sending command: ${command}`);
-                websocket.send(command);
-                return;
-            }
+    if (setHysteresisBtn) {
+        setHysteresisBtn.addEventListener('click', () => {
+            if (!hysteresisBandInput) return;
+            const value = hysteresisBandInput.value;
+            if (value === '') return;
+            const command = `tune hys ${value}`;
+            console.log(`Sending command: ${command}`);
+            websocket.send(command);
+        });
+    }
 
-            const command = `fan_tune ${parts.join(' ')}`;
+    if (setWarmingBiasBtn) {
+        setWarmingBiasBtn.addEventListener('click', () => {
+            if (!warmingBiasInput) return;
+            const value = warmingBiasInput.value;
+            if (value === '') return;
+            const command = `tune warmbias ${value}`;
+            console.log(`Sending command: ${command}`);
+            websocket.send(command);
+        });
+    }
+
+    if (setHeatingBiasBtn) {
+        setHeatingBiasBtn.addEventListener('click', () => {
+            if (!heatingBiasInput) return;
+            const value = heatingBiasInput.value;
+            if (value === '') return;
+            const command = `tune heatbias ${value}`;
             console.log(`Sending command: ${command}`);
             websocket.send(command);
         });
@@ -689,13 +721,23 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    [hysteresisBandInput, fanSpeedCirculationInput, fanMinInput, fanMaxInput, fanSmoothAlphaInput].forEach((el) => {
-        if (el && setFanBtn) {
-            el.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter') setFanBtn.click();
-            });
-        }
-    });
+    if (hysteresisBandInput && setHysteresisBtn) {
+        hysteresisBandInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') setHysteresisBtn.click();
+        });
+    }
+
+    if (warmingBiasInput && setWarmingBiasBtn) {
+        warmingBiasInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') setWarmingBiasBtn.click();
+        });
+    }
+
+    if (heatingBiasInput && setHeatingBiasBtn) {
+        heatingBiasInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') setHeatingBiasBtn.click();
+        });
+    }
 
     // Minimize controls: toggle widget content
     document.querySelectorAll('.minimize-btn').forEach((btn) => {
