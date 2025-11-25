@@ -27,11 +27,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const setHeatingBiasBtn = document.getElementById('set_heating_bias_btn');
     const ffTableBody = document.getElementById('ff_table_body');
     const warmingTableBody = document.getElementById('warming_table_body');
-        const lowerBoundMarker = document.getElementById('lower-bound-marker');
-        const upperBoundMarker = document.getElementById('upper-bound-marker');
-        const warmingLowerMarker = document.getElementById('warming-lower-marker');
-        const warmingUpperMarker = document.getElementById('warming-upper-marker');
-        const warmingBandEl = document.getElementById('warming-band');
+    const lowerBoundMarker = document.getElementById('lower-bound-marker');
+    const upperBoundMarker = document.getElementById('upper-bound-marker');
     const chartContainer = document.getElementById('candlestick-chart');
     const candlePeriodEl = document.getElementById('candle_period');
     const candleOpenEl = document.getElementById('candle_open');
@@ -55,6 +52,14 @@ document.addEventListener('DOMContentLoaded', () => {
     let chart;
     let candleSeries;
     let priceScaleWheelBound = false;
+    const PID_INPUT_HOLD_MS = 2000;
+    let pidInputsHoldUntil = 0;
+    let pidInputsDirty = false;
+    const pidGains = {
+        box: { kp: null, ki: null, kd: null },
+        heat: { kp: null, ki: null, kd: null },
+        cool: { kp: null, ki: null, kd: null }
+    };
 
     const formatters = {
         current_temperature: (v) => `${v.toFixed(2)} °C`,
@@ -62,8 +67,12 @@ document.addEventListener('DOMContentLoaded', () => {
         current_humidity: (v) => `${v.toFixed(1)} %`,
         env_temperature: (v) => `${v.toFixed(2)} °C`,
         current_ptc_temperature: (v) => `${v.toFixed(2)} °C`,
+        ptc_target_temperature: (v) => `${v.toFixed(2)} °C`,
         pwm_percent: (v) => `${v.toFixed(1)} %`,
         current_pwm: (v) => v.toFixed(4),
+        box_kp: (v) => v.toFixed(6),
+        box_ki: (v) => v.toFixed(6),
+        box_kd: (v) => v.toFixed(6),
         heat_kp: (v) => v.toFixed(6),
         heat_ki: (v) => v.toFixed(6),
         heat_kd: (v) => v.toFixed(6),
@@ -76,20 +85,70 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const ffTableInitial = [
-        { temperature: 20.0, baseSpeed: 0.00 },
-        { temperature: 30.0, baseSpeed: 0.10 },
-        { temperature: 40.0, baseSpeed: 0.20 },
-        { temperature: 50.0, baseSpeed: 0.35 },
-        { temperature: 60.0, baseSpeed: 0.50 }
+        { temperature: 20.0, baseSpeed: 0.18 },
+        { temperature: 25.0, baseSpeed: 0.23 },
+        { temperature: 30.0, baseSpeed: 0.27 },
+        { temperature: 40.0, baseSpeed: 0.36 },
+        { temperature: 50.0, baseSpeed: 0.46 },
+        { temperature: 60.0, baseSpeed: 0.55 },
+        { temperature: 70.0, baseSpeed: 0.64 },
+        { temperature: 80.0, baseSpeed: 0.73 },
+        { temperature: 90.0, baseSpeed: 0.82 },
+        { temperature: 100.0, baseSpeed: 0.91 }
     ];
 
     const warmingTableInitial = [
-        { target: 25.0, threshold: 3.0 },
-        { target: 30.0, threshold: 2.5 },
-        { target: 40.0, threshold: 2.0 },
-        { target: 55.0, threshold: 1.5 },
-        { target: 70.0, threshold: 1.0 }
+        { target: 25.0, ptc: 35.0 },
+        { target: 30.0, ptc: 40.5 },
+        { target: 40.0, ptc: 53.0 },
+        { target: 57.0, ptc: 85.0 },
+        { target: 70.0, ptc: 100.0 }
     ];
+
+    const formatGainInput = (value) => (Number.isFinite(value) ? value.toFixed(6) : '');
+
+    function cachePidGains(data) {
+        if (!data) return;
+        const update = (controller, key, value) => {
+            if (Number.isFinite(value) && pidGains[controller]) {
+                pidGains[controller][key] = value;
+            }
+        };
+        update('box', 'kp', data.box_kp);
+        update('box', 'ki', data.box_ki);
+        update('box', 'kd', data.box_kd);
+        update('heat', 'kp', data.heat_kp);
+        update('heat', 'ki', data.heat_ki);
+        update('heat', 'kd', data.heat_kd);
+        update('cool', 'kp', data.cool_kp);
+        update('cool', 'ki', data.cool_ki);
+    }
+
+    function populatePidInputsForMode(mode) {
+        const controller = mode || (pidModeSelect ? pidModeSelect.value : 'heat');
+        const gains = pidGains[controller];
+        if (!gains) return;
+        if (kpInput) kpInput.value = formatGainInput(gains.kp);
+        if (kiInput) kiInput.value = formatGainInput(gains.ki);
+        const coolingMode = controller === 'cool';
+        if (kdInput) {
+            kdInput.disabled = coolingMode;
+            kdInput.placeholder = coolingMode ? 'N/A for cooling PI' : '';
+            kdInput.value = coolingMode ? '' : formatGainInput(gains.kd);
+        }
+    }
+
+    function pidInputsFocused() {
+        const active = document.activeElement;
+        return active === kpInput || active === kiInput || active === kdInput;
+    }
+
+    function refreshPidInputsIfIdle() {
+        if (pidInputsFocused()) return;
+        if (Date.now() < pidInputsHoldUntil) return;
+        if (pidInputsDirty) return;
+        populatePidInputsForMode(pidModeSelect ? pidModeSelect.value : 'heat');
+    }
 
     // --- Utility Functions ---
     const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
@@ -118,23 +177,8 @@ document.addEventListener('DOMContentLoaded', () => {
             setElementDisplay(el, true);
         }
 
-        function updateWarmingBand(lowerValue, upperValue) {
-            if (!warmingBandEl || !Number.isFinite(lowerValue) || !Number.isFinite(upperValue)) {
-                setElementDisplay(warmingBandEl, false);
-                return;
-            }
-            const lowerPercent = markerPercent(lowerValue);
-            const upperPercent = markerPercent(upperValue);
-            const bottom = Math.min(lowerPercent, upperPercent);
-            const height = Math.max(Math.abs(upperPercent - lowerPercent), 1.5);
-            warmingBandEl.style.bottom = `${bottom}%`;
-            warmingBandEl.style.height = `${height}%`;
-            setElementDisplay(warmingBandEl, true);
-        }
-
         function hideBoundVisuals() {
-            [lowerBoundMarker, upperBoundMarker, warmingLowerMarker, warmingUpperMarker].forEach((el) => setElementDisplay(el, false));
-            setElementDisplay(warmingBandEl, false);
+            [lowerBoundMarker, upperBoundMarker].forEach((el) => setElementDisplay(el, false));
         }
 
     // Text update helper (no visual highlight)
@@ -383,9 +427,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function updateThermometer(data) {
         const current = Number(data.current_temperature);
         const target = Number(data.target_temperature);
-        const warmingThreshold = Number(data.warming_threshold);
         const hysteresis = Number(data.hysteresis_band);
-        const hasBounds = Number.isFinite(target) && Number.isFinite(warmingThreshold) && Number.isFinite(hysteresis);
+        const hasBounds = Number.isFinite(target) && Number.isFinite(hysteresis);
 
         const rangeValues = [];
         if (Number.isFinite(current)) rangeValues.push(current);
@@ -393,15 +436,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         let lowerBound;
         let upperBound;
-        let warmingLower;
-        let warmingUpper;
 
         if (hasBounds) {
-            lowerBound = target - hysteresis - warmingThreshold;
-            warmingLower = target - hysteresis / 2.0;
-            warmingUpper = target + hysteresis / 2.0;
-            upperBound = target + hysteresis;
-            [lowerBound, warmingLower, warmingUpper, upperBound].forEach((value) => {
+            lowerBound = target - hysteresis;
+            upperBound = target + hysteresis + 1;
+            [lowerBound, upperBound].forEach((value) => {
                 if (Number.isFinite(value)) {
                     rangeValues.push(value);
                 }
@@ -428,10 +467,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (hasBounds) {
             updateBoundMarker(lowerBoundMarker, lowerBound, `Lower ${lowerBound.toFixed(1)}°C`);
-            updateBoundMarker(upperBoundMarker, upperBound, `Upper ${upperBound.toFixed(1)}°C`);
-            updateBoundMarker(warmingLowerMarker, warmingLower, `Warm ↓ ${warmingLower.toFixed(1)}°C`);
-            updateBoundMarker(warmingUpperMarker, warmingUpper, `Warm ↑ ${warmingUpper.toFixed(1)}°C`);
-            updateWarmingBand(warmingLower, warmingUpper);
+            updateBoundMarker(upperBoundMarker, upperBound, `Upper (+1) ${upperBound.toFixed(1)}°C`);
         } else {
             hideBoundVisuals();
         }
@@ -452,15 +488,6 @@ document.addEventListener('DOMContentLoaded', () => {
         if (Number.isFinite(data.target_temperature)) {
             targetTemperatureInput.value = data.target_temperature.toFixed(1);
         }
-        if (Number.isFinite(data.heat_kp)) {
-            kpInput.value = data.heat_kp.toFixed(6);
-        }
-        if (Number.isFinite(data.heat_ki)) {
-            kiInput.value = data.heat_ki.toFixed(6);
-        }
-        if (Number.isFinite(data.heat_kd)) {
-            kdInput.value = data.heat_kd.toFixed(6);
-        }
         if (hysteresisBandInput && Number.isFinite(data.hysteresis_band)) {
             hysteresisBandInput.value = data.hysteresis_band.toFixed(3);
         }
@@ -470,6 +497,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (heatingBiasInput && Number.isFinite(data.heating_bias)) {
             heatingBiasInput.value = data.heating_bias.toFixed(2);
         }
+        cachePidGains(data);
+        populatePidInputsForMode(pidModeSelect ? pidModeSelect.value : 'heat');
         updateScaleLabels();
     }
 
@@ -530,7 +559,7 @@ document.addEventListener('DOMContentLoaded', () => {
             row.innerHTML = `
                 <td>${index}</td>
                 <td><input type="number" class="control-input" value="${entry.target.toFixed(1)}" id="warm-target-${index}" step="0.1"></td>
-                <td><input type="number" class="control-input" value="${entry.threshold.toFixed(3)}" id="warm-threshold-${index}" step="0.1"></td>
+                <td><input type="number" class="control-input" value="${entry.ptc.toFixed(1)}" id="warm-ptc-${index}" step="0.1"></td>
                 <td><button class="control-button warm-update-btn" data-index="${index}">Update</button></td>
             `;
             warmingTableBody.appendChild(row);
@@ -540,12 +569,12 @@ document.addEventListener('DOMContentLoaded', () => {
             button.addEventListener('click', (event) => {
                 const index = event.currentTarget.dataset.index;
                 const targetInput = document.getElementById(`warm-target-${index}`);
-                const thresholdInput = document.getElementById(`warm-threshold-${index}`);
-                if (!targetInput || !thresholdInput) return;
+                const ptcInput = document.getElementById(`warm-ptc-${index}`);
+                if (!targetInput || !ptcInput) return;
                 const targetValue = targetInput.value;
-                const thresholdValue = thresholdInput.value;
-                if (targetValue !== '' && thresholdValue !== '') {
-                    const command = `tune ff 1 ${targetValue} ${thresholdValue}`;
+                const ptcValue = ptcInput.value;
+                if (targetValue !== '' && ptcValue !== '') {
+                    const command = `tune ff 1 ${targetValue} ${ptcValue}`;
                     console.log(`Sending command: ${command}`);
                     websocket.send(command);
                 }
@@ -585,6 +614,8 @@ document.addEventListener('DOMContentLoaded', () => {
                             updateDashboard(pendingData);
                             updateThermometer(pendingData);
                             updateCandles(pendingData);
+                            cachePidGains(pendingData);
+                            refreshPidInputsIfIdle();
                             if (footerMessageEl) {
                                 footerMessageEl.textContent = `Last update: ${new Date().toLocaleTimeString()}`;
                             }
@@ -650,28 +681,41 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        filtered.forEach(({ param, value }) => {
-            const command = `tune ${mode} ${param} ${value}`;
-            console.log(`Sending command: ${command}`);
-            websocket.send(command);
+        if (filtered.length > 0) {
+            filtered.forEach(({ param, value }) => {
+                const command = `tune ${mode} ${param} ${value}`;
+                console.log(`Sending command: ${command}`);
+                websocket.send(command);
+                const numeric = parseFloat(value);
+                if (Number.isFinite(numeric) && pidGains[mode]) {
+                    pidGains[mode][param] = numeric;
+                }
+            });
+            pidInputsDirty = false;
+            pidInputsHoldUntil = Date.now() + PID_INPUT_HOLD_MS;
+            populatePidInputsForMode(mode);
+        }
+    });
+
+    const markPidInputsDirty = () => {
+        pidInputsDirty = true;
+        pidInputsHoldUntil = Date.now() + PID_INPUT_HOLD_MS;
+    };
+
+    [kpInput, kiInput, kdInput].forEach((input) => {
+        if (!input) return;
+        input.addEventListener('input', markPidInputsDirty);
+        input.addEventListener('focus', () => {
+            pidInputsHoldUntil = Date.now() + PID_INPUT_HOLD_MS;
         });
     });
 
-    function syncKdInputState() {
-        if (!pidModeSelect || !kdInput) {
-            return;
-        }
-        const coolingMode = pidModeSelect.value === 'cool';
-        kdInput.disabled = coolingMode;
-        kdInput.placeholder = coolingMode ? 'N/A for cooling PI' : '';
-        if (coolingMode) {
-            kdInput.value = '';
-        }
-    }
-
     if (pidModeSelect) {
-        pidModeSelect.addEventListener('change', syncKdInputState);
-        syncKdInputState();
+        pidModeSelect.addEventListener('change', () => {
+            pidInputsDirty = false;
+            populatePidInputsForMode(pidModeSelect.value);
+        });
+        populatePidInputsForMode(pidModeSelect.value);
     }
 
     if (setHysteresisBtn) {

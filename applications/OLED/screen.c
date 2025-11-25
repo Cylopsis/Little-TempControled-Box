@@ -23,7 +23,7 @@ void screen_on()
     {
         const char *state_label = "STANDBY";
         float metric_values[4];
-        const char *metric_labels[4] = {"CUR", "TGT", "ENV", "PTC"};
+        const char *metric_labels[4] = {"CUR", "TGT", "PTG", "PTC"};
         const float slider_half_span = 30.0f; // 越小温差条波动越明显
         float delta = 0.0f;
         float slider_ratio = 0.0f;
@@ -47,7 +47,7 @@ void screen_on()
 
         metric_values[0] = current_temperature;
         metric_values[1] = target_temperature;
-        metric_values[2] = env_temperature;
+        metric_values[2] = ptc_target_temp;
         metric_values[3] = ptc_temperature;
 
         delta = current_temperature - target_temperature;

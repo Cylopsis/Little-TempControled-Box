@@ -35,20 +35,37 @@ menu "Application Configuration"
     
     endmenu
     menu "MOS-PTC Configuration"
-        config PKG_USING_PTC_PWM_DEV_NAME
+        config APP_PTC_PWM_DEV_NAME
             string "MOS-PTC PWM Device Name"
             default "pwm0"
             help
                 Set the PWM device name for the MOS-PTC heater.
-        config PKG_USING_PTC_PWM_CHANNEL
+        config APP_PTC_PWM_CHANNEL
             int "MOS-PTC PWM Channel"
             default 1
             help
                 Set the PWM channel for the MOS-PTC heater.
-        config PKG_USING_PTC_FREQUENCY
+        config APP_PTC_FREQUENCY
             int "MOS-PTC PWM Frequency  (Hz)"
-            default 100
+            default 2000
             help
                 Set the PWM frequency for the MOS-PTC heater in Hertz.
+        config PTC_MAX_SAFE_TEMP
+            int "MOS-PTC Maximum Safe Temperature (°C)"
+            default 110
+            help
+                Set the maximum safe operating temperature for the MOS-PTC heater in degrees Celsius.
+    endmenu
+    menu "WLAN Configuration"
+        config APP_WLAN_SSID
+            string "WLAN SSID"
+            default "142A_SecurityPlus"
+            help
+                Set the SSID for the WLAN connection.
+        config APP_WLAN_PASSWORD
+            string "WLAN Password"
+            default "142a8888"
+            help
+                Set the password for the WLAN connection.
     endmenu
 endmenu

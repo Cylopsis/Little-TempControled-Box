@@ -30,18 +30,11 @@
           <div class="thermometer">
             <div class="thermometer-column">
               <div id="target-marker" class="thermometer-target" tabindex="0" aria-label="Target temperature marker"></div>
-              <div id="warming-band" class="thermo-zone-band"></div>
               <div id="lower-bound-marker" class="thermo-bound-line bound-low" tabindex="0" aria-label="Lower bound line">
-                <span class="marker-label">Lower Bound</span>
-              </div>
-              <div id="warming-lower-marker" class="thermo-bound-line bound-warm" tabindex="0" aria-label="Warming lower line">
-                <span class="marker-label">Warm ↓</span>
-              </div>
-              <div id="warming-upper-marker" class="thermo-bound-line bound-warm" tabindex="0" aria-label="Warming upper line">
-                <span class="marker-label">Warm ↑</span>
+                <span class="marker-label">Heating Bound</span>
               </div>
               <div id="upper-bound-marker" class="thermo-bound-line bound-high" tabindex="0" aria-label="Upper bound line">
-                <span class="marker-label">Upper Bound</span>
+                <span class="marker-label">Cooling Bound</span>
               </div>
               <div id="temperature-fill" class="thermometer-fill">
                 <div id="temperature-label" class="thermometer-label current">--°C</div>
@@ -58,9 +51,8 @@
           <div class="thermometer-legend">
             <span class="legend-item"><span class="marker current"></span>Current</span>
             <span class="legend-item"><span class="marker target"></span>Target</span>
-            <span class="legend-item"><span class="marker lower"></span>Lower Bound</span>
-            <span class="legend-item"><span class="marker warm"></span>Warming Zone</span>
-            <span class="legend-item"><span class="marker upper"></span>Upper Bound</span>
+            <span class="legend-item"><span class="marker lower"></span>Heating Bound</span>
+            <span class="legend-item"><span class="marker upper"></span>Cooling Bound</span>
           </div>
         </div>
       </div>
@@ -126,6 +118,13 @@
               </div>
             </div>
             <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-bullseye"></i></div>
+              <div class="metric-info">
+                <span class="label">PTC Target Temperature:</span>
+                <span id="ptc_target_temperature" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
               <div class="metric-icon"><i class="fas fa-stream"></i></div>
               <div class="metric-info">
                 <span class="label">Control State:</span>
@@ -181,23 +180,44 @@
           <h3><i class="fas fa-sliders-h"></i> PID Diagnostics</h3>
           <div class="grid-container">
             <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-project-diagram"></i></div>
+              <div class="metric-info">
+                <span class="label">Box PID Kp:</span>
+                <span id="box_kp" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-project-diagram"></i></div>
+              <div class="metric-info">
+                <span class="label">Box PID Ki:</span>
+                <span id="box_ki" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
+              <div class="metric-icon"><i class="fas fa-project-diagram"></i></div>
+              <div class="metric-info">
+                <span class="label">Box PID Kd:</span>
+                <span id="box_kd" class="value">--</span>
+              </div>
+            </div>
+            <div class="metric-card">
               <div class="metric-icon"><i class="fas fa-equals"></i></div>
               <div class="metric-info">
-                <span class="label">Heat PID Kp:</span>
+                <span class="label">PTC PID Kp:</span>
                 <span id="heat_kp" class="value">--</span>
               </div>
             </div>
             <div class="metric-card">
               <div class="metric-icon"><i class="fas fa-equals"></i></div>
               <div class="metric-info">
-                <span class="label">Heat PID Ki:</span>
+                <span class="label">PTC PID Ki:</span>
                 <span id="heat_ki" class="value">--</span>
               </div>
             </div>
             <div class="metric-card">
               <div class="metric-icon"><i class="fas fa-equals"></i></div>
               <div class="metric-info">
-                <span class="label">Heat PID Kd:</span>
+                <span class="label">PTC PID Kd:</span>
                 <span id="heat_kd" class="value">--</span>
               </div>
             </div>
@@ -242,7 +262,8 @@
           <div class="control-group">
             <label for="pid_mode_select">Controller:</label>
             <select id="pid_mode_select" class="control-input">
-              <option value="heat" selected>Heating / Warming</option>
+              <option value="box">Box (Outer Loop)</option>
+              <option value="heat" selected>PTC Heater (Inner Loop)</option>
               <option value="cool">Cooling Fan</option>
             </select>
           </div>
@@ -287,7 +308,7 @@
                 <tr>
                   <th>Index</th>
                   <th>Target (°C)</th>
-                  <th>Threshold (°C)</th>
+                  <th>PTC Temp (°C)</th>
                   <th>Action</th>
                 </tr>
               </thead>

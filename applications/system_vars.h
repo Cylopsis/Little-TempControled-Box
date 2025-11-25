@@ -14,7 +14,7 @@ typedef struct rt_device_pwm* rt_pwm_t;
 #define DHT_DATA_PIN        ((2*32)+1)       // DHT11数据引脚
 #define PTC_TEMP_ADC    	"adc0"
 #define PTC_ADC_CHANNEL 	0
-#define PTC_PERIOD      	(1000000000 / PKG_USING_PTC_FREQUENCY)
+#define PTC_PERIOD      	(1000000000 / APP_PTC_FREQUENCY)
 #define NTC_R25             10000.0f  		// 25度时的阻值 10k
 #define NTC_B_VALUE         3950.0f   		// B值
 #define NTC_SERIES_R        10000.0f  		// 分压串联电阻 10k
@@ -22,7 +22,6 @@ typedef struct rt_device_pwm* rt_pwm_t;
 #define ADC_RESOLUTION      65535.0f  		// 16bit ADC
 #define SAMPLE_PERIOD_MS    1000          	// 主线程采样周期 (ms)
 #define CONTROL_PERIOD_MS 	100         	// PID控制周期 (ms)
-#define PTC_MAX_SAFE_TEMP   120.0f           // PTC最大工作温度 (°C)
 
 /* 传感器信息 */
 extern volatile float env_temperature;        // 环境温度
@@ -30,6 +29,7 @@ extern volatile float current_humidity;       // 当前湿度值
 extern volatile float current_temperature;    // 当前温度值
 extern volatile float target_temperature;     // 目标温度值
 extern volatile float ptc_temperature;        // PTC温度值
+extern volatile float ptc_target_temp;        // PTC目标温度
 /* 温控参数 */
 extern float warming_threshold;       // 当前保温阈值 (由前馈表决定)
 extern float warming_bias;            // 保温偏置温度（PTC温度高于目标温度多少用于保温）
@@ -49,7 +49,8 @@ typedef struct {
     float out_min;
     float out_max;
 } pid_ctx_t;
-extern pid_ctx_t pid_heat; // 加热 PID
+extern pid_ctx_t pid_box;  // 外环PID控制PTC目标温度
+extern pid_ctx_t pid_ptc;  // 内环PID控制PTC温度
 extern pid_ctx_t pid_cool; // 风扇 PI
 typedef enum {
 	CONTROL_STATE_HEATING=0,

@@ -26,14 +26,13 @@
   - 使用 NTC + ADC 测量 PTC 表面温度 `ptc_temperature`，用于加热闭环与过温保护  
   - OLED 屏幕实时显示控制状态、箱内温度、目标温度、环境温度等
 
-[OLED](assets/OLED.jpg)
-
+![OLED](assets/OLED.jpg)
 - 网络与远程控制  
   - 板端启动 TCP 服务器，提供 JSON 状态查询和参数配置接口（命令 `get_status` / `tune`）  
   - Python [`websocket_proxy.py`](applications/remote/websocket_proxy.py) 作为 WebSocket 代理，与浏览器前端通讯  
   - Web 仪表盘 [`index.html`](applications/HTML/index.html) 展示实时温度 / PTC 状态 / 控制状态 / PID 参数等，并支持在线调参
 
-[dashboard](assets/dashboard.png)
+![dashboard](assets/dashboard.png)
 
 - 调参与诊断  
   - MSH 命令：  
@@ -81,7 +80,7 @@ flowchart LR
 - 基于箱内温度构造三态状态机：
 
   ```c
-  warming_threshold = get_warming_threshold(target_temperature);
+  warming_threshold = get_warming_temp(target_temperature);
   float upper_bound = target_temperature + hysteresis_band;
   float lower_bound = target_temperature - hysteresis_band - warming_threshold;
 
@@ -118,15 +117,15 @@ flowchart LR
 - 状态依赖控制：
 
   - `CONTROL_STATE_HEATING`（加热阶段）
-    - 目标为 PTC 目标温度：`target_temperature + heating_bias`
-    - PID 控制器：`pid_heat`（三参数 PID）
-    - 前馈：`get_feedforward_pwm(target_temperature + heating_bias)`  
+    - 外环 `pid_box`：根据箱体温度 `current_temperature → target_temperature` 计算 PTC 目标温度
+    - 内环 `pid_ptc`：将 `ptc_temperature` 拉向外环给定的 `ptc_target_temp`
+    - 前馈：`get_feedforward_pwm(ptc_target_temp)`  
       前馈表 `ff_table[]` 为 PTC 目标温度 → PWM 占空比
     - 对 PTC 温度做过温保护：超过 `PTC_MAX_SAFE_TEMP` 立即将输出置 0
 
   - `CONTROL_STATE_WARMING`（保温阶段）
-    - 目标为 PTC 保温温度：`target_temperature + warming_bias`
-    - 同样使用 `pid_heat` + 前馈控制，但积分限幅相对较小，以避免保温时输出抖动过大
+    - 仍然使用级联 PID（`pid_box` + `pid_ptc`），但外环积分限幅更小以减少抖动
+    - `warming_ff_table[]` 结合箱体温度给出保温阈值，帮助状态机在 HEATING/WARMING 间切换
 
   - `CONTROL_STATE_COOLING`（冷却阶段）
     - 控制目标为箱内温度 `current_temperature` 跟踪 `target_temperature`
@@ -153,7 +152,7 @@ flowchart LR
   - `STATE_PIN`：0=制热（PWM 信号传递给 MOS‑PTC），1=降温（PWM 信号传递给风扇）
 - PTC 相关：
   - `PTC_TEMP_ADC` / `PTC_ADC_CHANNEL`：NTC 所在 ADC 通道
-  - `PTC_PERIOD = 1e9 / PKG_USING_PTC_FREQUENCY`：PWM 周期（纳秒）
+  - `PTC_PERIOD = 1e9 / APP_PTC_FREQUENCY`：PWM 周期（纳秒）
   - `PTC_MAX_SAFE_TEMP`：PTC 安全最高工作温度
 - NTC 参数：
   - `NTC_R25`、`NTC_B_VALUE`、`NTC_SERIES_R`、`ADC_REF_VOLTAGE`、`ADC_RESOLUTION`
@@ -163,7 +162,8 @@ flowchart LR
 
 - PID 上下文：
   - `pid_ctx_t` 包含 $K_P, K_I, K_D$、积分、前一误差、输出限幅等
-  - `pid_heat`：加热/保温 PID
+  - `pid_box`：箱体温度外环 PID（给出 PTC 目标温度）
+  - `pid_ptc`：PTC 温度内环 PID
   - `pid_cool`：冷却 PI
 
 ### 2. PWM 设备配置 [`applications/Kconfig`](applications/Kconfig)
@@ -171,14 +171,14 @@ flowchart LR
 - 风扇 `YS4028B12H` 相关配置（仍然存在）  
 - MOS‑PTC 配置：
 
-  - `PKG_USING_PTC_PWM_DEV_NAME`：MOS-PTC 使用的 PWM 设备名（默认 `"pwm0"`）
-  - `PKG_USING_PTC_PWM_CHANNEL`：PWM 通道号（默认 1）
-  - `PKG_USING_PTC_FREQUENCY`：PWM 频率（Hz），用于计算 `PTC_PERIOD`
+  - `APP_PTC_PWM_DEV_NAME`：MOS-PTC 使用的 PWM 设备名（默认 `"pwm0"`）
+  - `APP_PTC_PWM_CHANNEL`：PWM 通道号（默认 1）
+  - `APP_PTC_FREQUENCY`：PWM 频率（Hz），用于计算 `PTC_PERIOD`
 
 这些配置最终由 `initialization()` 中的：
 
 ```c
-pwm_dev = (rt_pwm_t)rt_device_find(PKG_USING_PTC_PWM_DEV_NAME);
+pwm_dev = (rt_pwm_t)rt_device_find(APP_PTC_PWM_DEV_NAME);
 rt_pwm_set(pwm_dev, 0, PTC_PERIOD, 0);
 rt_pwm_enable(pwm_dev, 0);
 ```
@@ -205,7 +205,8 @@ rt_pwm_enable(pwm_dev, 0);
       - `ptc_state`：`HEAT` 时 `"ON"` 否则 `"OFF"`（实质为加热/冷却模式标识）
       - `control_state`：`HEATING/WARMING/COOLING`
       - `current_pwm`：当前 PWM 占空比
-      - `heat_kp/heat_ki/heat_kd`：加热 PID 参数
+      - `heat_kp/heat_ki/heat_kd`：PTC 内环 PID 参数（兼容旧字段名）
+      - `box_kp/box_ki/box_kd`：箱体外环 PID 参数
       - `cool_kp/cool_ki`：冷却 PI 参数
       - `warming_bias/heating_bias`：PTC 温度偏置
       - `warming_threshold/hysteresis_band`：状态机相关参数
@@ -236,7 +237,11 @@ rt_pwm_enable(pwm_dev, 0);
     - 影响 `warming_threshold` 插值，用于决定 HEATING → WARMING 的区间
 
 - PID 参数：
-  - 加热/保温 PID：
+  - 箱体外环 PID：
+    - `tune box kp <val>`
+    - `tune box ki <val>`
+    - `tune box kd <val>`
+  - PTC 内环 PID：
     - `tune heat kp <val>`
     - `tune heat ki <val>`
     - `tune heat kd <val>`
@@ -253,18 +258,6 @@ rt_pwm_enable(pwm_dev, 0);
   - 状态机状态、箱内温度、PTC 温度、湿度、PWM 占空比、迟滞带
   - 加热 PID / 冷却 PI 的当前参数与内部积分、上一误差  
  便于线下通过串口快速调参与验证。
-
----
-
-## Web/PC 侧与之前基本保持一致
-
-- WebSocket 代理 [`applications/remote/websocket_proxy.py`](applications/remote/websocket_proxy.py)：
-  - 周期性向板端 TCP 服务器发送 `get_status`，解析 JSON 后广播给所有 WebSocket 客户端
-  - 客户端发送的任意命令行（如 `tune ...`）会被转发给板子
-
-- Web 前端 [`applications/HTML/index.html`](applications/HTML/index.html)：
-  - 仪表盘结构、历史 K 线等与之前一致
-  - 可根据 `current_ptc_temperature` 等新字段扩展显示内容（如增加 PTC 温度曲线）
 
 ---
 
@@ -326,7 +319,7 @@ rt_wlan_connect("142A_SecurityPlus", "142a8888");
    - 在线发送 `tune` 命令，调整目标温度、PID 参数、前馈表、偏置和迟滞  
    - 利用历史 K 线/曲线观察温控性能和 overshoot/settling time
 
-[history](assets/history.png)
+![history](assets/history.png)
 > K线图看起来比较有意思而已，可以随便换
 ---
 

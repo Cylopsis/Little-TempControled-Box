@@ -30,17 +30,19 @@ volatile float current_humidity = 50.0f;       // 当前湿度值
 volatile float current_temperature = 25.0f;    // 当前温度值
 volatile float target_temperature = 40.0f;     // 目标温度值
 volatile float ptc_temperature = 25.0f;        // PTC温度值
+volatile float ptc_target_temp = 40.0f;        // PTC目标温度
 
 /* 温控参数 */
 float warming_threshold = 3.0f;       // 当前保温阈值 (由前馈表决定)
-float warming_bias = 10.0f;           // 保温偏置温度（PTC温度高于目标温度多少用于保温）
-float heating_bias = 25.0f;           // 加热偏置温度（PTC温度高于目标温度多少用于加热）
+float warming_bias = 5.0f;            // 保温偏置温度（PTC温度高于目标温度多少用于保温）
+float heating_bias = 30.0f;           // 加热偏置温度（PTC温度高于目标温度多少用于加热）
 float hysteresis_band = 2.0f;         // 迟滞范围
 float fan_min = 0.00f;                // 最小风速
 float fan_max = 0.63f;                // 最大风速
 
 /* 控制状态与监控变量 */
-pid_ctx_t pid_heat; // 加热 PID
+pid_ctx_t pid_box;  // 外环PID控制PTC目标温度
+pid_ctx_t pid_ptc;  // 内环PID控制PTC温度
 pid_ctx_t pid_cool; // 风扇 PI
 volatile control_state_t control_state = CONTROL_STATE_WARMING;
 volatile rt_uint32_t ptc_state = HEAT;
@@ -68,14 +70,14 @@ const int num_ff_profiles = sizeof(ff_table) / sizeof(ff_table[0]);
 
 typedef struct {
     float target_temp;            // 目标温度
-    float threshold_value;        // 对应的 warming_threshold
+    float ptc_temp;               // 维持目标温度需要的PTC温度
 } warming_ff_entry_t;
 static warming_ff_entry_t warming_ff_table[] = {
-    { 25.0f, 3.0f },
-    { 30.0f, 2.5f },
-    { 40.0f, 1.0f },
-    { 55.0f, 0.0f },
-    { 70.0f, -1.0f }
+    { 25.0f, 35.0f },
+    { 30.0f, 40.5f },
+    { 40.0f, 53.0f },
+    { 57.0f, 85.0f },
+    { 70.0f, 100.0f }
 };
 const int num_warming_ff_entries = sizeof(warming_ff_table) / sizeof(warming_ff_table[0]);
 
@@ -88,7 +90,7 @@ void tune(int argc, char **argv);
 static const char* control_state_to_string(control_state_t state);
 rt_err_t initialization();
 static float get_feedforward_pwm(float target_temp);
-static float get_warming_threshold(float target_temp);
+static float get_warming_temp(float target_temp);
 static float ntc_adc_to_temp(uint32_t adc_val);
 void pid_entry(void *parameter);
 /*----------------------------------------------------------------------------*/
@@ -142,32 +144,35 @@ int main(void)
         else current_humidity = (float)(dht_humi_data.data.humi) / 10.0f;
 
         control_state_t previous_state = control_state;
-        warming_threshold = get_warming_threshold(target_temperature);
         float upper_bound = target_temperature + hysteresis_band;
-        float lower_bound = target_temperature - hysteresis_band - warming_threshold;
+        float lower_bound = target_temperature - hysteresis_band;
         if (current_temperature < lower_bound) {
             control_state = CONTROL_STATE_HEATING;
-        } else if (current_temperature > upper_bound) {
+        } else if (current_temperature > upper_bound + 1) {
             control_state = CONTROL_STATE_COOLING;
-        } else {
+        } else if (current_temperature < upper_bound ) {
             control_state = CONTROL_STATE_WARMING;
         }
         
         // 处理状态切换
         if (control_state != previous_state) {
             // rt_kprintf("State Changed: %s -> %s\n", control_state_to_string(previous_state), control_state_to_string(control_state));
-            // 安全措施：切换前关闭PWM
+            // 切换前关闭PWM
             rt_pwm_set(pwm_dev, 0, PTC_PERIOD, 0);
             rt_thread_mdelay(20);
-            if (control_state == CONTROL_STATE_HEATING) {
-                rt_pin_write(STATE_PIN, HEAT);
-                pid_heat.integral = 0.0f; // 重置积分
-                pid_heat.prev_error = 0.0f;
-            } else if (control_state == CONTROL_STATE_COOLING) {
-                rt_pin_write(STATE_PIN, COOL);
+            if (control_state == CONTROL_STATE_COOLING) {
+                ptc_state = COOL;
+                rt_pin_write(STATE_PIN, ptc_state);
                 pid_cool.integral = 0.0f; // 重置积分
                 pid_cool.prev_error = 0.0f;
-            } else rt_pin_write(STATE_PIN, HEAT);
+                pid_box.integral = 0.0f;
+                pid_box.prev_error = 0.0f;
+                pid_ptc.integral = 0.0f;
+                pid_ptc.prev_error = 0.0f;
+            } else {
+                ptc_state = HEAT;
+                rt_pin_write(STATE_PIN, ptc_state);
+            }
         }
 
         // rt_kprintf("PTC Temp: %.2f C | Current Temp: %.2f C, Target Temp: %.2f C, Env Temp: %.2f C, Humidity: %.2f %% | PWM: %.2f %%\n",
@@ -186,6 +191,7 @@ void pid_entry(void *parameter)
 {
     rt_kprintf("PID control thread started.\n");
     float dt = CONTROL_PERIOD_MS / 1000.0f;
+    float fan_cmd = 0.0f;
     while (1)
     {
         rt_uint32_t adc_value = rt_adc_read(adc_dev, 0);
@@ -197,57 +203,61 @@ void pid_entry(void *parameter)
         switch(control_state)
         {
             case CONTROL_STATE_HEATING:
+            case CONTROL_STATE_WARMING:
+            {
+                // 外环PID：控制箱内温度，输出PTC的目标温度
+                float outer_error = target_temperature - current_temperature;
+                pid_box.integral += outer_error * dt;
+                if(pid_box.integral > 100.0f) pid_box.integral = 100.0f;
+                if(pid_box.integral < -100.0f) pid_box.integral = -100.0f;
+                float outer_derivative = (outer_error - pid_box.prev_error) / dt;
+                float outer_output = pid_box.kp * outer_error + pid_box.ki * pid_box.integral + pid_box.kd * outer_derivative;
+                // 计算PTC目标温度
+                ptc_target_temp = get_warming_temp(target_temperature) + outer_output;
+                float ratio = fabs(outer_error + hysteresis_band) / (hysteresis_band * 2);
+                if (ratio > 1) ratio = 1;
+                float dynamic_bias = warming_bias + (heating_bias - warming_bias) * ratio;
+                if (ptc_target_temp > target_temperature + dynamic_bias) ptc_target_temp = target_temperature + dynamic_bias;
+                else if (ptc_target_temp < target_temperature + warming_bias) ptc_target_temp = target_temperature + warming_bias;
+                if (ptc_target_temp > PTC_MAX_SAFE_TEMP) ptc_target_temp = PTC_MAX_SAFE_TEMP;
+                
+                pid_box.prev_error = outer_error;
+
+                // 内环PID：控制PTC温度到ptc_target_temp
                 if (ptc_temperature >= PTC_MAX_SAFE_TEMP) {
                     output = 0.0f; // 过热保护
                     rt_kprintf("WARNING: PTC Overheat! Temp: %.1f\n", ptc_temperature);
                 } else {
-                    error = target_temperature + heating_bias - ptc_temperature;
-                    pid_heat.integral += error * dt;
-                    // 积分限幅
-                    if(pid_heat.integral > 50.0f) pid_heat.integral = 50.0f;
-                    if(pid_heat.integral < -50.0f) pid_heat.integral = -50.0f;
-                    float derivative = (error - pid_heat.prev_error) / dt;
-                    output = pid_heat.kp * error + pid_heat.ki * pid_heat.integral + pid_heat.kd * derivative;
-                    output += get_feedforward_pwm(target_temperature + heating_bias);
-                    if (output > pid_heat.out_max) output = pid_heat.out_max;
-                    if (output < pid_heat.out_min) output = pid_heat.out_min;
-                    pid_heat.prev_error = error;
+                    float inner_error = ptc_target_temp - ptc_temperature;
+                    pid_ptc.integral += inner_error * dt;
+                    if(pid_ptc.integral > 50.0f) pid_ptc.integral = 50.0f;
+                    if(pid_ptc.integral < -50.0f) pid_ptc.integral = -50.0f;
+                    float inner_derivative = (inner_error - pid_ptc.prev_error) / dt;
+                    output = pid_ptc.kp * inner_error + pid_ptc.ki * pid_ptc.integral + pid_ptc.kd * inner_derivative;
+                    output += get_feedforward_pwm(ptc_target_temp);
+                    if (output > pid_ptc.out_max) output = pid_ptc.out_max;
+                    if (output < pid_ptc.out_min) output = pid_ptc.out_min;
+                    pid_ptc.prev_error = inner_error;
                 }
                 break;
+            }
             case CONTROL_STATE_COOLING:
+                // 风扇 PI 控制
                 error = current_temperature - target_temperature;
                 pid_cool.integral += error * dt;
-                // 积分限幅
                 if(pid_cool.integral > 50.0f) pid_cool.integral = 50.0f;
                 if(pid_cool.integral < -50.0f) pid_cool.integral = -50.0f;
                 output = pid_cool.kp * error + pid_cool.ki * pid_cool.integral;
+                fan_cmd = fan_cmd + 0.37 * (output - fan_cmd);// 一阶滤波平滑输出
+                output = fan_cmd;
                 if (output > pid_cool.out_max) output = pid_cool.out_max;
                 if (output < pid_cool.out_min) output = pid_cool.out_min;
                 pid_cool.prev_error = error;
                 break;
-            case CONTROL_STATE_WARMING:
-                {
-                    float warm_ptc_target = target_temperature + warming_bias;
-                    
-                    if (ptc_temperature >= PTC_MAX_SAFE_TEMP) {
-                        output = 0.0f; // 过热保护
-                    } else {
-                        error = warm_ptc_target - ptc_temperature;
-                        pid_heat.integral += error * dt;
-                        if(pid_heat.integral > 20.0f)  pid_heat.integral = 20.0f;
-                        if(pid_heat.integral < -20.0f) pid_heat.integral = -20.0f;
-                        float derivative = (error - pid_heat.prev_error) / dt;
-                        output = pid_heat.kp * error + pid_heat.ki * pid_heat.integral + pid_heat.kd * derivative;
-                        output += get_feedforward_pwm(warm_ptc_target);
-                        if (output > pid_heat.out_max) output = pid_heat.out_max;
-                        if (output < pid_heat.out_min) output = pid_heat.out_min;
-                        pid_heat.prev_error = error;
-                    }
-                }
-                break;
             default:
                 output = 0.0f;
-                pid_heat.integral *= 0.98f;
+                pid_box.integral *= 0.98f;
+                pid_ptc.integral *= 0.98f;
                 pid_cool.integral *= 0.98f;
                 break;
         }
@@ -269,12 +279,17 @@ rt_err_t initialization()
     ptc_state = HEAT;
     control_state = CONTROL_STATE_WARMING;
     // 加热PID 
-    //TODO!:(需要整定，等我建模好了再说，或者可以使用一些机器学习方法，把目标函数黑盒转换为凸函数，然后做凸优化)
-    pid_heat.kp = 1.37f;
-    pid_heat.ki = 0.10f;
-    pid_heat.kd = 0.8f;
-    pid_heat.out_min = 0.0f;
-    pid_heat.out_max = 1.0f;
+    //TODO!:(需要整定，建模中，或者可以使用一些机器学习方法，把目标函数黑盒转换为凸函数，然后做凸优化)
+    pid_ptc.kp = 1.37f;
+    pid_ptc.ki = 0.10f;
+    pid_ptc.kd = 0.70f;
+    pid_ptc.out_min = 0.0f;
+    pid_ptc.out_max = 1.0f;
+    pid_box.kp = 0.10f;
+    pid_box.ki = 0.76f;
+    pid_box.kd = 0.37f;
+    pid_box.out_min = 0.0f;
+    pid_box.out_max = 1.0f;
     // 风冷PI (需要整定)
     pid_cool.kp = 0.01f;
     pid_cool.ki = 0.001f;
@@ -306,7 +321,7 @@ rt_err_t initialization()
     }
 
     /* 初始化 PWM */
-    pwm_dev = (rt_pwm_t)rt_device_find(PKG_USING_PTC_PWM_DEV_NAME);
+    pwm_dev = (rt_pwm_t)rt_device_find(APP_PTC_PWM_DEV_NAME);
     if (pwm_dev == RT_NULL) {
         rt_kprintf("PWM device not found!\n");
         result = -RT_ERROR;
@@ -316,7 +331,7 @@ rt_err_t initialization()
     }
 
     /* 连接 WiFi */
-    result |= rt_wlan_connect("142A_SecurityPlus", "142a8888");
+    result |= rt_wlan_connect(APP_WLAN_SSID, APP_WLAN_PASSWORD);
     rt_thread_mdelay(5000); // 等待连接稳定
     return result;
 }
@@ -352,24 +367,28 @@ static float get_feedforward_pwm(float target_temp)
     return 0.0f; // 理论上不会走到这里
 }
 
-static float get_warming_threshold(float target_temp)
+static float get_warming_temp(float target_temp)
 {
+    float ptc_temp = warming_ff_table[0].ptc_temp;
     if (target_temp <= warming_ff_table[0].target_temp)
-        return warming_ff_table[0].threshold_value;
-    if (target_temp >= warming_ff_table[num_warming_ff_entries - 1].target_temp)
-        return warming_ff_table[num_warming_ff_entries - 1].threshold_value;
-
-    for (int i = 0; i < num_warming_ff_entries - 1; i++)
+        ptc_temp = warming_ff_table[0].ptc_temp;
+    else if (target_temp >= warming_ff_table[num_warming_ff_entries - 1].target_temp)
+        ptc_temp = warming_ff_table[num_warming_ff_entries - 1].ptc_temp;
+    else
     {
-        warming_ff_entry_t *a = &warming_ff_table[i];
-        warming_ff_entry_t *b = &warming_ff_table[i + 1];
-        if (target_temp >= a->target_temp && target_temp <= b->target_temp)
+        for (int i = 0; i < num_warming_ff_entries - 1; i++)
         {
-            float ratio = (target_temp - a->target_temp) / (b->target_temp - a->target_temp);
-            return a->threshold_value + ratio * (b->threshold_value - a->threshold_value);
+            warming_ff_entry_t *a = &warming_ff_table[i];
+            warming_ff_entry_t *b = &warming_ff_table[i + 1];
+            if (target_temp >= a->target_temp && target_temp <= b->target_temp)
+            {
+                float ratio = (target_temp - a->target_temp) / (b->target_temp - a->target_temp);
+                ptc_temp = a->ptc_temp + ratio * (b->ptc_temp - a->ptc_temp);
+                break;
+            }
         }
     }
-    return warming_ff_table[num_warming_ff_entries - 1].threshold_value;
+    return ptc_temp;
 }
 
 static float ntc_adc_to_temp(uint32_t adc_val)
@@ -414,10 +433,14 @@ static void get_status(int argc, char **argv)
     rt_kprintf("\n----- PID Controllers -----\n");
     
     // 根据当前状态，高亮活动的控制器
-    const char* heat_active_str = (control_state == CONTROL_STATE_HEATING || control_state == CONTROL_STATE_WARMING) ? " (ACTIVE)" : "";
-    rt_kprintf("Heating/Idle PID%s\n", heat_active_str);
-    rt_kprintf("  Gains:    Kp=%.3f, Ki=%.3f, Kd=%.3f\n", pid_heat.kp, pid_heat.ki, pid_heat.kd);
-    rt_kprintf("  Internal: I-Term=%.3f, Prev-Err=%.3f\n", pid_heat.integral, pid_heat.prev_error);
+    const char* heat_active_str = (control_state != CONTROL_STATE_COOLING) ? " (ACTIVE)" : "";
+    rt_kprintf("Outer PID (Box)%s\n", heat_active_str);
+    rt_kprintf("  Gains:    Kp=%.3f, Ki=%.3f, Kd=%.3f\n", pid_box.kp, pid_box.ki, pid_box.kd);
+    rt_kprintf("  Internal: I-Term=%.3f, Prev-Err=%.3f\n", pid_box.integral, pid_box.prev_error);
+
+    rt_kprintf("Inner PID (PTC)%s\n", heat_active_str);
+    rt_kprintf("  Gains:    Kp=%.3f, Ki=%.3f, Kd=%.3f\n", pid_ptc.kp, pid_ptc.ki, pid_ptc.kd);
+    rt_kprintf("  Internal: I-Term=%.3f, Prev-Err=%.3f\n", pid_ptc.integral, pid_ptc.prev_error);
 
     const char* cool_active_str = (control_state == CONTROL_STATE_COOLING) ? " (ACTIVE)" : "";
     rt_kprintf("Cooling PI%s\n", cool_active_str);
@@ -435,7 +458,8 @@ void tune(int argc, char **argv)
         rt_kprintf("  tune warmbias <val>        (Set warming bias temperature in C)\n");
         rt_kprintf("  tune heatbias <val>        (Set heating bias temperature in C)\n");
         rt_kprintf("  tune ff <0-ptc/1-warmt> <temp> <val> (Set feedforward value)\n");
-        rt_kprintf("  tune heat <kp|ki|kd> <val> (Tune heating/warming PID)\n");
+        rt_kprintf("  tune box <kp|ki|kd> <val>  (Tune outer box PID)\n");
+        rt_kprintf("  tune heat <kp|ki|kd> <val> (Tune inner PTC PID)\n");
         rt_kprintf("  tune cool <kp|ki> <val>    (Tune cooling PI)\n");
         rt_kprintf("\n----- Example -----\n");
         rt_kprintf("  tune heat kp 0.3\n");
@@ -494,8 +518,8 @@ void tune(int argc, char **argv)
             {
                 if (fabsf(warming_ff_table[i].target_temp - temp) < 2.0f) {
                     found = RT_TRUE;
-                    warming_ff_table[i].threshold_value = value;
-                    rt_kprintf("Warming feedforward threshold for %.2f C set to %.2f\n", temp, value);
+                    warming_ff_table[i].ptc_temp = value;
+                    rt_kprintf("Warming feedforward PTC Temperature for %.2f C set to %.2f\n", temp, value);
                     return;
                 }
             }
@@ -509,13 +533,23 @@ void tune(int argc, char **argv)
         }
         return;
     }
+    else if (strcmp(cmd, "box") == 0) {
+        if (argc != 4) { rt_kprintf("Usage: tune box <kp|ki|kd> <value>\n"); return; }
+        const char *param = argv[2];
+        float value = atof(argv[3]);
+        if (strcmp(param, "kp") == 0) pid_box.kp = value;
+        else if (strcmp(param, "ki") == 0) pid_box.ki = value;
+        else if (strcmp(param, "kd") == 0) pid_box.kd = value;
+        else { rt_kprintf("Error: Unknown box param '%s'. Use kp, ki, or kd.\n", param); return; }
+        rt_kprintf("Box PID '%s' set to %f\n", param, value);
+    }
     else if (strcmp(cmd, "heat") == 0) {
         if (argc != 4) { rt_kprintf("Usage: tune heat <kp|ki|kd> <value>\n"); return; }
         const char *param = argv[2];
         float value = atof(argv[3]);
-        if (strcmp(param, "kp") == 0) pid_heat.kp = value;
-        else if (strcmp(param, "ki") == 0) pid_heat.ki = value;
-        else if (strcmp(param, "kd") == 0) pid_heat.kd = value;
+        if (strcmp(param, "kp") == 0) pid_ptc.kp = value;
+        else if (strcmp(param, "ki") == 0) pid_ptc.ki = value;
+        else if (strcmp(param, "kd") == 0) pid_ptc.kd = value;
         else { rt_kprintf("Error: Unknown heat param '%s'. Use kp, ki, or kd.\n", param); return; }
         rt_kprintf("Heat PID '%s' set to %f\n", param, value);
     }
@@ -568,9 +602,12 @@ void eval_ptc(int argc, char **argv)
 
     target_temperature = eval_target_temp;
     control_state = CONTROL_STATE_WARMING;
+    ptc_state = HEAT;
     rt_pin_write(STATE_PIN, HEAT);
-    pid_heat.integral = 0.0f; // 重置PID积分，确保一个干净的开始
-    pid_heat.prev_error = 0.0f;
+    pid_ptc.integral = 0.0f; // 重置PID积分，确保一个干净的开始
+    pid_ptc.prev_error = 0.0f;
+    pid_box.integral = 0.0f;
+    pid_box.prev_error = 0.0f;
 
     float total_absolute_error = 0.0f;
     rt_tick_t start_tick = rt_tick_get();
@@ -640,9 +677,11 @@ void force_state(int argc, char **argv)
         rt_pwm_set(pwm_dev, 0, PTC_PERIOD, 0); // 切换前先停止输出，更安全
         rt_thread_mdelay(20);
 
-        // 重置两个PID控制器，防止旧状态的累积误差影响新状态
-        pid_heat.integral = 0.0f;
-        pid_heat.prev_error = 0.0f;
+        // 重置三个PID控制器，防止旧状态的累积误差影响新状态
+        pid_box.integral = 0.0f;
+        pid_box.prev_error = 0.0f;
+        pid_ptc.integral = 0.0f;
+        pid_ptc.prev_error = 0.0f;
         pid_cool.integral = 0.0f;
         pid_cool.prev_error = 0.0f;
 
@@ -651,9 +690,11 @@ void force_state(int argc, char **argv)
         {
             case CONTROL_STATE_HEATING:
             case CONTROL_STATE_WARMING:
+                ptc_state = HEAT;
                 rt_pin_write(STATE_PIN, HEAT);
                 break;
             case CONTROL_STATE_COOLING:
+                ptc_state = COOL;
                 rt_pin_write(STATE_PIN, COOL);
                 break;
         }

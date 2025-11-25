@@ -116,6 +116,7 @@ static void remote_server_thread_entry(void *parameter)
                     "\"current_ptc_temperature\":%.2f,"\
                     "\"current_temperature\":%.2f,"\
                     "\"target_temperature\":%.2f,"\
+                    "\"ptc_target_temperature\":%.2f,"\
                     "\"current_humidity\":%.2f,"\
                     "\"env_temperature\":%.2f,"\
                     "\"ptc_state\":\"%s\","\
@@ -124,6 +125,9 @@ static void remote_server_thread_entry(void *parameter)
                     "\"heat_kp\":%.2f,"\
                     "\"heat_ki\":%.2f,"\
                     "\"heat_kd\":%.2f,"\
+                    "\"box_kp\":%.2f,"\
+                    "\"box_ki\":%.2f,"\
+                    "\"box_kd\":%.2f,"\
                     "\"cool_kp\":%.2f,"\
                     "\"cool_ki\":%.2f,"\
                     "\"warming_bias\":%.2f,"\
@@ -134,14 +138,18 @@ static void remote_server_thread_entry(void *parameter)
                     ptc_temperature,
                     current_temperature,
                     target_temperature,
+                    ptc_target_temp,
                     current_humidity,
                     env_temperature,
                     ptc_state_str,
                     ctrl_state_str,
                     final_pwm_duty,
-                    pid_heat.kp,
-                    pid_heat.ki,
-                    pid_heat.kd,
+                    pid_ptc.kp,
+                    pid_ptc.ki,
+                    pid_ptc.kd,
+                    pid_box.kp,
+                    pid_box.ki,
+                    pid_box.kd,
                     pid_cool.kp,
                     pid_cool.ki,
                     warming_bias,

@@ -617,10 +617,17 @@
 
 /* MOS-PTC Configuration */
 
-#define PKG_USING_PTC_PWM_DEV_NAME "pwm0"
-#define PKG_USING_PTC_PWM_CHANNEL 0
-#define PKG_USING_PTC_FREQUENCY 2000
+#define APP_PTC_PWM_DEV_NAME "pwm0"
+#define APP_PTC_PWM_CHANNEL 0
+#define APP_PTC_FREQUENCY 2000
+#define PTC_MAX_SAFE_TEMP 110
 /* end of MOS-PTC Configuration */
+
+/* WLAN Configuration */
+
+#define APP_WLAN_SSID "142A_SecurityPlus"
+#define APP_WLAN_PASSWORD "142a8888"
+/* end of WLAN Configuration */
 /* end of Application Configuration */
 
 #endif
